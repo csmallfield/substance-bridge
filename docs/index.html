@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Substance Bridge Tutorial</title>
+<meta name="description" content="Tutorial for Substance Bridge, a Godot 4.7 editor plugin that renders Substance .sbsar files, bakes mesh maps and builds materials without leaving the editor.">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<button class="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">Contents</button>
+<div class="layout">
+
+<nav class="sidebar" id="sidebar" aria-label="Contents">
+  <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>Substance Bridge</a>
+  <ul class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#setup">Setup</a></li>
+    <li><a href="#quick-start">Quick start</a></li>
+    <li><a href="#inspector">The generated Inspector</a></li>
+    <li class="sub"><a href="#visibility">Visibility rules</a></li>
+    <li class="sub"><a href="#presets">Presets and revert</a></li>
+    <li><a href="#preview">Previews and final renders</a></li>
+    <li><a href="#materials">How materials are built</a></li>
+    <li><a href="#variants">Seed variants</a></li>
+    <li><a href="#batch">Batch rendering</a></li>
+    <li><a href="#mesh-maps">Mesh-adaptive graphs</a></li>
+    <li><a href="#native-baker">Native baker</a></li>
+    <li><a href="#noise-lab">Noise Lab</a></li>
+    <li><a href="#files">Where files go</a></li>
+    <li><a href="#settings">Settings reference</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#testing">Tests</a></li>
+  </ul>
+  <button class="theme-toggle" type="button">Theme: auto</button>
+</nav>
+
+<main id="top">
+<div class="content">
+
+<p class="eyebrow">Godot 4.7 editor plugin · tutorial</p>
+<h1>Substance Bridge</h1>
+<p class="lead">Pick a mesh and a material graph, set its parameters in the Inspector, and get a baked, mesh-fitted <code>StandardMaterial3D</code> built and applied without leaving the Godot editor.</p>
+
+<div class="badges">
+  <span class="badge">Godot 4.7</span>
+  <span class="badge">Substance Designer 11.1 tools</span>
+  <span class="badge">Automation Toolkit 2018.2</span>
+  <span class="badge">Windows</span>
+  <span class="badge">Private use</span>
+</div>
+
+<figure class="hero">
+  <img src="images/11_view_variants.webp" width="1063" height="902" alt="Three rocks in the Godot 3D view, each wearing a different seed of the same tarmac material">
+  <figcaption>Three seed variants of one <code>.sbsar</code>, one per rock, made with a single click.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="overview">Overview</h2>
+
+<p>Substance Bridge drives Adobe's Substance command-line tools from inside the editor and turns their output into Godot materials. A second, native backend runs the noise lab's Godot rebuilds of Substance noises through the same workflow.</p>
+
+<div class="grid-cards">
+  <div class="card"><h3>Generated Inspector</h3><p>Sliders, colours, toggles, dropdowns, groups, visibility rules and presets, read from the <code>.sbsar</code> itself.</p></div>
+  <div class="card"><h3>Live previews</h3><p>A 512 px preview re-renders about 2 s after you stop changing a value. Render the final size when you're happy.</p></div>
+  <div class="card"><h3>Mesh-fitted materials</h3><p>Mesh-adaptive graphs get AO, curvature, position and world normal baked from the selected mesh.</p></div>
+  <div class="card"><h3>Variants and batch</h3><p>Many seeds from one graph, one per mesh; re-render every material at any size.</p></div>
+  <div class="card"><h3>Native baker</h3><p>Bake mesh maps inside Godot, with no Substance tools, close to <code>sbsbaker</code>'s results.</p></div>
+  <div class="card"><h3>Noise Lab backend</h3><p>Grunge Maps and standalone noises rebuilt in Godot, with the same Inspector and previews.</p></div>
+</div>
+
+<figure>
+  <img src="images/01_editor.webp" width="1920" height="1080" alt="The Godot editor with the Substance Bridge dock on the right">
+  <figcaption>The Substance Bridge dock sits beside the Inspector, top right. Widen the dock column if its buttons look cramped.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="setup">Setup</h2>
+
+<h3>1. Tools</h3>
+<p>The plugin calls three external programs. Their paths are editor settings (<em>Editor &gt; Editor Settings &gt; Substance Bridge</em>); the defaults match a standard install:</p>
+
+<table>
+  <thead><tr><th>Tool</th><th>Used for</th><th>Default path</th></tr></thead>
+  <tbody>
+    <tr><td><code>sbsrender</code></td><td>Rendering <code>.sbsar</code> files</td><td><code>C:/Program Files/Allegorithmic/Substance Designer/sbsrender.exe</code></td></tr>
+    <tr><td><code>sbsbaker</code></td><td>Baking mesh maps (unless you use the native baker)</td><td><code>C:/Program Files/Allegorithmic/Substance Automation Toolkit/sbsbaker.exe</code></td></tr>
+    <tr><td>7-Zip</td><td>Reading the parameter metadata inside <code>.sbsar</code> files</td><td><code>C:/Program Files/7-Zip/7z.exe</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <p><code>sbsbaker</code> doesn't ship with Designer; it comes with the Substance Automation Toolkit. Version 2018.2 is the last one available without an enterprise licence, and it's the one this plugin was validated with. It reads FBX and OBJ, not glTF, so the plugin bakes from an OBJ it writes from the Godot mesh.</p>
+</div>
+
+<h3>2. Enable the plugin</h3>
+<p>Copy <code>addons/substance_bridge</code> into your project and tick <strong>Substance Bridge</strong> in <em>Project &gt; Project Settings &gt; Plugins</em>. On start-up it checks the three paths and asks each tool for its version. Missing tools show in the dock's status line, and the versions it found are listed in the dock's log.</p>
+
+<div class="side">
+  <div>
+    <h3>3. Noise Lab (optional)</h3>
+    <p>The Noise Lab backend uses the generators from the <code>sd-mm-noise-lab</code> project. Link them into this project as <code>res://noiselab</code> with a directory junction, from the project folder:</p>
+    <pre><code>mklink /J noiselab D:\01_github\sd-mm-noise-lab\godot\noiselab</code></pre>
+    <p>The junction is git-ignored. Without it the Noise Lab choice in the dock says it isn't linked, and everything else works as before.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/02_dock_empty.webp" width="413" height="955" alt="The Substance Bridge dock before any material is created, with tool versions in its log">
+    <figcaption>A fresh dock. The log at the bottom lists the tool versions found at start-up.</figcaption>
+  </figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="quick-start">Quick start</h2>
+
+<ol class="steps">
+  <li><strong>Select one or more <code>MeshInstance3D</code> nodes</strong> in your scene. They need clean, non-overlapping UVs (UV0).</li>
+  <li><strong>Choose a source</strong> in the dock: <em>Substance (.sbsar)</em> plus a file (type a path or click <kbd>...</kbd>), or <em>Noise Lab (native)</em> plus a noise.</li>
+  <li><strong>Click Create and Apply to Selected.</strong> The bridge makes a settings resource, renders a 512 px preview, builds a material and puts it in each selected mesh's <em>Material Override</em> (one undoable action).</li>
+  <li><strong>Edit the parameters</strong> in the Inspector, which opens on the new material's settings. The preview re-renders shortly after each change.</li>
+  <li><strong>Click Render Final</strong> to render the same settings at full size (2K by default).</li>
+</ol>
+
+<div class="side">
+  <figure>
+    <img src="images/04_view_tarmac.webp" width="1063" height="902" alt="A rock in the 3D view wearing the tarmac material with painted yellow arrows">
+    <figcaption>The rock wears the new material straight away. This is <code>tarmac.sbsar</code> at its default settings.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/03_dock_created.webp" width="413" height="955" alt="The dock after creating a material: current material tarmac, preview at 512 in 3.1 s">
+    <figcaption>After Create: the dock names the material, its <code>.sbsar</code> and seed, its sizes and how many parameters you've changed.</figcaption>
+  </figure>
+</div>
+
+<div class="callout">
+  <p>Any later change to the same material updates its textures and <code>.tres</code> in place, so every mesh and scene that uses it picks up the change.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="inspector">The generated Inspector</h2>
+
+<p>Each material has a settings resource, <code>&lt;name&gt;_graph.tres</code>. Selecting it, clicking <strong>Edit Parameters</strong>, or selecting a mesh that uses its material shows it in the Inspector. The top section holds the bridge's own settings; below it, the graph's parameters appear as if they were ordinary properties.</p>
+
+<div class="pair">
+  <figure>
+    <img class="ui" src="images/05_inspector_settings.webp" width="431" height="807" alt="Inspector showing Source, Random Seed, Preview Size, Final Size, Auto Preview, Bake Size, Baker, Baked Mesh and Material">
+    <figcaption>The bridge's settings: source (read-only), seed, preview and final sizes, auto preview, mesh-map options and the generated material.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/05b_inspector_params.webp" width="431" height="807" alt="Inspector showing the Tarmac graph's parameters: preset, colours, toggles, sliders and groups">
+    <figcaption>The graph's parameters, built from the <code>.sbsar</code>'s own description: labels, slider ranges, colour pickers, toggles and groups.</figcaption>
+  </figure>
+</div>
+
+<table>
+  <thead><tr><th>In the <code>.sbsar</code></th><th>In the Inspector</th></tr></thead>
+  <tbody>
+    <tr><td>Slider with min, max and step</td><td>A slider with the same range; unclamped sliders also accept values beyond it</td></tr>
+    <tr><td>Colour (float3 or float4)</td><td>A colour picker (no alpha for float3)</td></tr>
+    <tr><td>Toggle button</td><td>A checkbox</td></tr>
+    <tr><td>Dropdown (combobox)</td><td>A dropdown with the graph's item names</td></tr>
+    <tr><td>Group</td><td>A collapsible group</td></tr>
+    <tr><td>Presets</td><td>A <em>Preset</em> dropdown at the top</td></tr>
+    <tr><td>Image inputs with mesh-map usages</td><td>Hidden: filled by the baker (see <a href="#mesh-maps">Mesh-adaptive graphs</a>)</td></tr>
+  </tbody>
+</table>
+
+<p>Change a value and the preview follows. Here the asphalt colour is a dark red, and <em>Tarmac Damage</em> and <em>Tarmac Dirtiness</em> are raised:</p>
+
+<div class="side"
+  <figure>
+    <img src="images/07_view_edited.webp" width="1063" height="902" alt="The rock after editing: a warmer, more damaged and dirtier surface">
+    <figcaption>The re-rendered preview on the rock.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/08_inspector_edited.webp" width="431" height="807" alt="Inspector with changed values marked by revert arrows">
+    <figcaption>Changed values get a revert arrow. Only those are saved; the rest follow the graph's defaults.</figcaption>
+  </figure>
+</div>
+
+<h3 id="visibility">Visibility rules</h3>
+<div class="side">
+  <div>
+    <p>Graphs can hide parameters that don't apply, with rules such as <code>input["painted_arrows"]==true</code>. The Inspector follows them: turn <em>Painted Arrows</em> off on tarmac and the paint colour, arrow tiling, paint damage and paint roughness and metallic disappear.</p>
+    <p>A rule the bridge can't evaluate shows the parameter rather than hiding it, so nothing is ever lost.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/09_inspector_visibleif.webp" width="431" height="807" alt="Inspector with Painted Arrows off and its dependent parameters hidden">
+    <figcaption>Painted Arrows off: the arrow settings are hidden.</figcaption>
+  </figure>
+</div>
+
+<h3 id="presets">Presets and revert</h3>
+<ul>
+  <li><strong>Preset</strong> applies one of the graph's built-in presets (tarmac has <em>Dusty</em> and <em>Pristine</em>), including its seed. After that, the values are yours to change.</li>
+  <li><strong>Revert</strong> (the arrow next to a changed value) puts that parameter back to the graph's default.</li>
+  <li><strong>Source</strong> is read-only: a material's folder, name and values belong to its graph. To try another <code>.sbsar</code> on the same mesh, create a new material.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="preview">Previews and final renders</h2>
+
+<div class="side">
+  <div>
+    <ul>
+      <li><strong>Auto preview on change</strong> (on by default) re-renders at the preview size 0.35 s after your last change. Several quick changes give one render.</li>
+      <li><strong>Preview</strong> renders now at the preview size (256, 512, 1K or 2K; 512 by default).</li>
+      <li><strong>Render Final</strong> renders at the final size (512, 1K, 2K or 4K; 2K by default). The button shows the size.</li>
+      <li>If nothing that affects the maps has changed since the last render at that size, the render is skipped and the dock says it's up to date.</li>
+      <li>Rendering runs off the main thread, so the editor stays responsive.</li>
+    </ul>
+    <p>Typical times on an RTX 3080: a tarmac preview at 512 takes about 2 s from change to updated material; a final render of its 8 maps at 2K takes a few seconds more.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/10_dock_final.webp" width="413" height="955" alt="Dock after a final render at 2K">
+    <figcaption>After Render Final (2K).</figcaption>
+  </figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="materials">How materials are built</h2>
+
+<p>Outputs are matched to material slots by their declared usage, never by file name:</p>
+
+<table>
+  <thead><tr><th>Usage</th><th>StandardMaterial3D slot</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>baseColor</code> (or <code>diffuse</code>)</td><td>Albedo</td><td>Godot reads it as sRGB</td></tr>
+    <tr><td><code>normal</code></td><td>Normal Map</td><td>Imported as a normal map; green flipped if the graph produced DirectX normals</td></tr>
+    <tr><td><code>roughness</code></td><td>Roughness</td><td>Red channel, roughness 1.0</td></tr>
+    <tr><td><code>metallic</code></td><td>Metallic</td><td>Red channel, metallic 1.0</td></tr>
+    <tr><td><code>ambientOcclusion</code></td><td>Ambient Occlusion</td><td>Enabled, red channel</td></tr>
+    <tr><td><code>emissive</code></td><td>Emission</td><td>Enabled, white multiplier</td></tr>
+    <tr><td><code>height</code></td><td>Height</td><td>Assigned but left off: turn on <em>Height</em> in the material to use parallax</td></tr>
+  </tbody>
+</table>
+
+<p>Other outputs (<code>specular</code>, <code>glossiness</code>) are listed in the dock's log as not wired.</p>
+
+<div class="callout">
+  <p><strong>Normal maps.</strong> Godot expects OpenGL-style normals (Y up). When a graph has a DirectX/OpenGL switch, the bridge asks for OpenGL. When it doesn't, the map is DirectX and its green channel is flipped on import. You don't have to do anything either way.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="variants">Seed variants</h2>
+
+<p><strong>Make Seed Variants</strong> copies the current material with new random seeds: same graph, same values, same mesh and sizes. Set how many with the number box. Each variant gets its own folder and name (<code>tarmac_seed1</code>, <code>tarmac_seed2</code>, …) and renders at its preview size.</p>
+<p>If you select several meshes first, mesh 1 gets variant 1, mesh 2 gets variant 2 and so on, in one undoable action. It's a quick way to fill a scene with rocks that don't repeat.</p>
+
+<div class="side"
+  <figure>
+    <img src="images/11_view_variants.webp" width="1063" height="902" alt="Three rocks, each with a different variant of the edited tarmac material">
+    <figcaption>Three variants applied to three rocks.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/12_dock_variants.webp" width="413" height="955" alt="Dock reporting three variants made and applied">
+    <figcaption>"Made 3 variant(s) of tarmac, applied to 3 mesh(es)."</figcaption>
+  </figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="batch">Batch rendering</h2>
+
+<div class="side">
+  <div>
+    <p><strong>Render All</strong> re-renders every material in the output folder. Choose the size:</p>
+    <ul>
+      <li><strong>Each material's final size</strong> or <strong>preview size</strong>.</li>
+      <li>A fixed <strong>512, 1K, 2K or 4K</strong> for everything, for example 1K while testing a level and 2K for a final build.</li>
+    </ul>
+    <p><strong>Re-bake mesh maps (ignore cache)</strong> also throws away cached mesh maps and renders everything even if nothing changed. Use it after editing a mesh or its UVs.</p>
+    <p><strong>Cancel</strong> stops after the material that's rendering. A material that fails is listed in the status line and the batch carries on.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/13_dock_batch.webp" width="413" height="955" alt="Dock after a batch: 3 rendered in 7 s">
+    <figcaption>A batch at 512: "3 rendered in 7 s".</figcaption>
+  </figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="mesh-maps">Mesh-adaptive graphs</h2>
+
+<p>Some Substance graphs take mesh maps as image inputs: ambient occlusion, curvature, position, world-space normal or thickness. They use them for edge wear, cavity dirt, top-down moss and similar effects. When you create a material from such a graph, the bridge does the rest:</p>
+
+<ol class="steps">
+  <li>Reads which mesh maps the graph wants, from the usage each image input declares (<code>ambientOcclusion</code>, <code>curvature</code>, <code>position</code>, <code>normalWS</code>, <code>thickness</code>).</li>
+  <li>Writes the first selected mesh out as an OBJ: the exact mesh and UVs Godot renders, so meshes from FBX, glTF or code all work.</li>
+  <li>Bakes those maps at the bake size (2K by default), running the bakers in parallel. AO and curvature at 2K take about 4 s with <code>sbsbaker</code>.</li>
+  <li>Plugs each map into its input and renders. Bakes are cached per mesh and size, so previews and parameter changes never re-bake.</li>
+</ol>
+
+<div class="pair">
+  <figure>
+    <img class="ui" src="images/14_dock_mesh_maps.webp" width="413" height="955" alt="Dock for a mesh-adaptive graph: lists mesh maps, bake size, source mesh and baker, with a Bake from Selected Mesh button">
+    <figcaption>For a mesh-adaptive graph the dock shows which maps it uses, the bake size, the source mesh and the baker, plus <strong>Bake from Selected Mesh</strong>.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/16_inspector_baker.webp" width="431" height="807" alt="Inspector for a mesh-adaptive graph: Bake Size, Baker and Baked Mesh filled in">
+    <figcaption>Bake Size and Baker are settings; Baked Mesh records which mesh the maps came from.</figcaption>
+  </figure>
+</div>
+
+<ul>
+  <li><strong>Bake from Selected Mesh</strong> points the current material at another mesh, bakes its maps and applies the material to it.</li>
+  <li>Changing <strong>Bake Size</strong> re-bakes at the new size once; the old bakes stay cached.</li>
+  <li>A mesh-adaptive graph without a mesh tells you to select one and press Bake from Selected Mesh, rather than rendering something wrong.</li>
+</ul>
+
+<div class="callout warn">
+  <p><strong>Pick graphs that suit the shape.</strong> The bake is only half of it. JRO's <code>PL_ISF_Gen_Edging01</code>, used in these tests, looks for hard edges, so on a soft, rounded rock its mask stays almost black. A graph built around organic AO and curvature (for example one using Designer's <code>mg_dirt</code> or <code>mg_edge_wear</code> with its mesh inputs exposed) gives wear and dirt that follow the rock's shape.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="native-baker">Native baker</h2>
+
+<p>Set a material's <strong>Baker</strong> to <em>Native (Godot)</em> and its AO, curvature, position and world-normal maps are baked inside Godot instead of by <code>sbsbaker</code>. That removes the dependency on Adobe's tools for mesh maps. Thickness still uses <code>sbsbaker</code>.</p>
+
+<div class="side">
+  <div>
+    <p>How it works:</p>
+    <ul>
+      <li>The mesh is drawn into its own UV layout, so each texel knows its position and normal on the mesh.</li>
+      <li>Curvature comes from how fast the normal changes compared with the position.</li>
+      <li>AO renders the mesh from 64 directions into depth maps, then checks each texel against every depth map facing it.</li>
+      <li>A last pass fills the gutter around UV islands so seams don't bleed.</li>
+    </ul>
+    <p>All four maps at 2K take about 5 s.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/17_dock_native.webp" width="413" height="955" alt="Dock showing the native baker in use">
+    <figcaption>The dock shows "native baker" for the current material.</figcaption>
+  </figure>
+</div>
+
+<figure>
+  <img src="images/bake_compare.webp" width="1280" height="640" alt="Native bakes in the top row and sbsbaker bakes in the bottom row: world normal, curvature, AO and position">
+  <figcaption>Native (top) against <code>sbsbaker</code> (bottom) on the test rock at 2K: world normal, curvature, AO and position. The bottom row fills the whole gutter; the native baker fills 16 px around each island.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>Map</th><th>Correlation with sbsbaker</th><th>Mean difference</th></tr></thead>
+  <tbody>
+    <tr><td>World normal</td><td>1.000</td><td>0.5/255</td></tr>
+    <tr><td>Position</td><td>1.000</td><td>10.8/255 (range normalised differently)</td></tr>
+    <tr><td>Curvature</td><td>0.90</td><td>5.1/255</td></tr>
+    <tr><td>Ambient occlusion</td><td>0.76</td><td>3.7/255</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <p>The curvature strength and AO occluder distance were calibrated on one rock. Hard-surface meshes may need different values. The native baker draws through the editor window, so <strong>keep the editor visible</strong> while it bakes; minimised, it times out after 2 minutes with a message saying so.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="noise-lab">Noise Lab</h2>
+
+<p>Set the dock's source to <strong>Noise Lab (native)</strong> and pick a noise: Grunge Maps 001–015, or standalone noises such as <code>dirt_1</code>–<code>dirt_5</code>, <code>moisture_noise</code>, <code>fluid</code>, <code>cells_1</code>–<code>cells_4</code>, <code>perlin_noise</code> and the fur, fibre and directional noises. These are Godot rebuilds of Substance Designer's noises, so they render on your GPU inside the editor, about 0.5 s at 512.</p>
+
+<div class="pair">
+  <figure>
+    <img class="ui" src="images/18_dock_noise.webp" width="413" height="955" alt="Dock with Noise Lab selected and grunge_014 chosen">
+    <figcaption>Source: Noise Lab, noise: <code>grunge_014</code>.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/20_inspector_noise.webp" width="431" height="807" alt="Inspector for a Noise Lab material: Balance, Contrast, Invert and a Normal map group">
+    <figcaption>Grunge Maps have balance, contrast and invert; every noise has a normal strength.</figcaption>
+  </figure>
+</div>
+
+<div class="pair">
+  <figure>
+    <img src="images/19_view_noise.webp" width="1063" height="902" alt="Rock with Grunge Map 014 as albedo, height and normal">
+    <figcaption>Grunge Map 014 on the rock, normal strength 8.</figcaption>
+  </figure>
+  <figure>
+    <img src="images/21_view_moisture.webp" width="1063" height="902" alt="Rock with the moisture noise">
+    <figcaption>The moisture noise at its defaults.</figcaption>
+  </figure>
+</div>
+
+<p>Each noise renders three maps: a greyscale <strong>albedo</strong>, a full-precision <strong>height</strong> (EXR) and a <strong>normal</strong> map made from the height. Previews, variants, batch rendering and the material builder work exactly as for <code>.sbsar</code> files. Standalone noises get <em>scale</em> and <em>disorder</em> plus their own settings (angle, warp intensity, edge width and so on).</p>
+
+<div class="callout warn">
+  <p>Like the native baker, the noise lab renders through the editor window: keep the editor visible while a noise renders. The noise lab's code is private; see its README before sharing anything made with it.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="files">Where files go</h2>
+
+<pre><code>res://substance_bridge/            output folder (project setting)
+  tarmac/
+    tarmac_graph.tres              settings: source + changed values   (tracked in git)
+    tarmac.tres                    the StandardMaterial3D               (generated)
+    tarmac_baseColor.png …         one texture per usage                (generated)
+  tarmac_seed1/ …                  each variant has its own folder
+
+user://substance_bridge/           per-machine cache
+  xml/      metadata extracted from .sbsar files
+  renders/  raw tool output before import
+  meshes/   meshes exported for baking (.obj, plus .res for the native baker)
+  bakes/    mesh maps, per mesh, size and baker</code></pre>
+
+<p>The settings files are the source of truth: everything else is regenerated from them. In this project's git setup the <code>_graph.tres</code> files are tracked and the textures and materials are ignored. After a fresh clone, run <strong>Render All</strong> to rebuild them. Mesh-adaptive materials also need <strong>Bake from Selected Mesh</strong> once, because the baked meshes live in the per-machine cache.</p>
+
+<!-- ============================================================ -->
+<h2 id="settings">Settings reference</h2>
+
+<h3>Editor settings (per machine)</h3>
+<table>
+  <thead><tr><th>Setting</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>substance_bridge/tools/sbsrender_path</code></td><td>Designer's <code>sbsrender.exe</code></td></tr>
+    <tr><td><code>substance_bridge/tools/sbsbaker_path</code></td><td>Automation Toolkit's <code>sbsbaker.exe</code></td></tr>
+    <tr><td><code>substance_bridge/tools/7zip_path</code></td><td><code>C:/Program Files/7-Zip/7z.exe</code></td></tr>
+    <tr><td><code>substance_bridge/render/engine</code></td><td><code>d3d11pc</code> (GPU); <code>sse2</code> is the CPU engine</td></tr>
+  </tbody>
+</table>
+
+<h3>Project setting</h3>
+<table>
+  <thead><tr><th>Setting</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>substance_bridge/output_folder</code></td><td><code>res://substance_bridge</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Per-material settings (Inspector)</h3>
+<table>
+  <thead><tr><th>Setting</th><th>Values</th></tr></thead>
+  <tbody>
+    <tr><td>Random Seed</td><td>Any integer</td></tr>
+    <tr><td>Preview Size</td><td>256, 512 (default), 1K, 2K</td></tr>
+    <tr><td>Final Size</td><td>512, 1K, 2K (default), 4K</td></tr>
+    <tr><td>Auto Preview</td><td>On (default) or off</td></tr>
+    <tr><td>Bake Size</td><td>1K, 2K (default), 4K (mesh-adaptive graphs)</td></tr>
+    <tr><td>Baker</td><td>Substance (default) or Native</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<table>
+  <thead><tr><th>You see</th><th>What to do</th></tr></thead>
+  <tbody>
+    <tr><td>"Missing tools: …" in the dock</td><td>Fix the path in Editor Settings &gt; Substance Bridge. The dock's log lists the versions it found.</td></tr>
+    <tr><td>"Select one or more MeshInstance3D nodes first."</td><td>Create needs at least one selected <code>MeshInstance3D</code>.</td></tr>
+    <tr><td>"This graph takes mesh maps (…)"</td><td>Select the mesh and press <strong>Bake from Selected Mesh</strong>.</td></tr>
+    <tr><td>"… did not finish … keep the editor visible"</td><td>The Noise Lab and the native baker render through the editor window. Restore the window and try again.</td></tr>
+    <tr><td>"The noise lab is not linked into this project"</td><td>Create the <code>noiselab</code> junction (see <a href="#setup">Setup</a>).</td></tr>
+    <tr><td>Render failed with an image-input warning</td><td>A baked map or image file couldn't be loaded. <code>sbsrender</code> exits 0 in that case, so the bridge reads its warnings and reports the failure for you.</td></tr>
+    <tr><td>The dock stops updating after you edit the plugin's scripts</td><td>Godot reloaded the scripts in place. Untick and re-tick the plugin, or restart the editor.</td></tr>
+    <tr><td>Mesh maps look wrong or blotchy</td><td>Check the mesh's UVs: they must be clean, non-overlapping and inside 0–1.</td></tr>
+  </tbody>
+</table>
+
+<p>Every command line the plugin runs, with measured timings and the tool behaviours it guards against, is in <a href="https://github.com/csmallfield/substance-bridge/blob/main/docs/validated-commands.md">validated-commands.md</a>.</p>
+
+<!-- ============================================================ -->
+<h2 id="testing">Tests</h2>
+
+<p>Run from the project folder with the Godot 4.7 console executable:</p>
+<pre><code>godot --headless --path . --script res://addons/substance_bridge/tests/runner_check.gd
+godot --headless --path . --script res://addons/substance_bridge/tests/backend_check.gd
+godot --headless --path . --script res://addons/substance_bridge/tests/obj_check.gd
+godot --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
+godot --path . --script res://addons/substance_bridge/tests/native_bake_check.gd</code></pre>
+<p>The editor self-test drives the dock end to end: create, Inspector, previews, variants, batch, mesh-adaptive baking with both bakers, and the Noise Lab. Set <code>SUBSTANCE_BRIDGE_SELFTEST</code> to <code>tarmac.sbsar</code>, optionally <code>SUBSTANCE_BRIDGE_SELFTEST_MESH</code> and <code>SUBSTANCE_BRIDGE_SELFTEST_NOISE</code>, then run the editor with <code>--log-file</code>. Run it windowed on a copy of the project. The screenshots on this page come from <code>tests/tour.gd</code>, run the same way with <code>SUBSTANCE_BRIDGE_TOUR</code> set to an output folder.</p>
+
+<footer>
+  <p>Substance Bridge is a private project. Substance, Substance Designer and the Substance Automation Toolkit are Adobe products; this plugin only calls their command-line tools. Screenshots: Godot 4.7, RTX 3080, November 2026.</p>
+</footer>
+
+</div>
+</main>
+</div>
+
+<dialog class="lightbox" aria-label="Enlarged screenshot"><img alt=""></dialog>
+
+<script>
+(() => {
+  // Click a screenshot to see it full size; click again or press Escape to close.
+  const box = document.querySelector('dialog.lightbox');
+  const big = box.querySelector('img');
+  document.querySelectorAll('figure img').forEach(img => {
+    img.addEventListener('click', () => {
+      big.src = img.src;
+      big.alt = img.alt;
+      box.showModal();
+    });
+  });
+  box.addEventListener('click', () => box.close());
+
+  // Highlight the section being read in the contents.
+  const links = [...document.querySelectorAll('.toc a')];
+  const byId = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const seen = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting && byId.has(e.target.id)) {
+        links.forEach(a => a.classList.remove('active'));
+        byId.get(e.target.id).classList.add('active');
+      }
+    });
+  }, { rootMargin: '0px 0px -70% 0px' });
+  document.querySelectorAll('h2[id], h3[id]').forEach(h => seen.observe(h));
+
+  // Small screens: the contents slide in from the left.
+  const sidebar = document.getElementById('sidebar');
+  const menu = document.querySelector('.menu-button');
+  menu.addEventListener('click', () => {
+    const open = sidebar.classList.toggle('open');
+    menu.setAttribute('aria-expanded', String(open));
+  });
+  links.forEach(a => a.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+    menu.setAttribute('aria-expanded', 'false');
+  }));
+
+  // Theme: auto -> light -> dark. Remembered per browser when storage is available.
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const order = ['auto', 'light', 'dark'];
+  let theme = 'auto';
+  try { theme = localStorage.getItem('sb-theme') || 'auto'; } catch (e) {}
+  const apply = t => {
+    if (t === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t);
+    button.textContent = 'Theme: ' + t;
+  };
+  apply(theme);
+  button.addEventListener('click', () => {
+    theme = order[(order.indexOf(theme) + 1) % order.length];
+    apply(theme);
+    try { localStorage.setItem('sb-theme', theme); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

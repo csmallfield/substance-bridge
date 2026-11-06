@@ -1,4 +1,4 @@
-﻿# Substance Bridge: validated commands
+# Substance Bridge: validated commands
 
 Exact command lines that ran successfully on the work machine. These are the plugin's
 command templates. Anything not marked **verified** has not been run here yet.

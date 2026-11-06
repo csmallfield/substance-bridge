@@ -1,6 +1,5 @@
 [gd_scene format=3 uid="uid://j1qf6wbth4mo"]
 
-[ext_resource type="Material" uid="uid://daog7ltnrx8d6" path="res://substance_bridge/JRO_PaintedConcrete_s42/JRO_PaintedConcrete_s42.tres" id="1_baq7a"]
 [ext_resource type="ArrayMesh" uid="uid://c7tl20s1077v2" path="res://test/rock01_mesh.res" id="2_38xyi"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_xu02d"]
@@ -24,7 +23,6 @@ shadow_enabled = true
 
 [node name="Rock" type="MeshInstance3D" parent="." unique_id=42298216]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.060376324, 0)
-material_override = ExtResource("1_baq7a")
 mesh = ExtResource("2_38xyi")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1793805315]

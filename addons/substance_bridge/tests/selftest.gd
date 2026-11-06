@@ -1,136 +1,125 @@
 @tool
 extends RefCounted
-## Editor self-test: runs the dock's full pipeline (render -> import -> material) on an
-## .sbsar, checks the material, writes res://test/rock_test.tscn with the rock wearing it,
-## then quits the editor with exit code 0 (pass) or 1 (fail).
+## Editor self-test of the full workflow, driven through the dock:
+## create -> generated inspector properties -> auto preview on change -> skip unchanged ->
+## preset -> final render -> reload from disk. Uses res://test/rock_test.tscn (its "Rock"
+## node; the scene is not saved), then quits with exit code 0 or 1.
 ##
 ## Run with the editor headless:
-##   set SUBSTANCE_BRIDGE_SELFTEST=<path to .sbsar>
+##   set SUBSTANCE_BRIDGE_SELFTEST=<path to tarmac.sbsar>
 ##   godot --headless --editor --path <project>
 
-const ROCK_FBX := "res://assets/rock01.fbx"
-const TEST_DIR := "res://test"
+const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
+const Pipeline := preload("res://addons/substance_bridge/core/pipeline.gd")
+
+const SCENE := "res://test/rock_test.tscn"
+const WAIT_MS := 120000
 
 var _fails := 0
+var _tree: SceneTree
 
 
 func run(dock: Node, sbsar: String) -> void:
+	_tree = Engine.get_main_loop() as SceneTree
 	print("[selftest] start: ", sbsar)
-	# Let the editor finish its first scan/import of the project.
 	var fs := EditorInterface.get_resource_filesystem()
-	var tree := Engine.get_main_loop() as SceneTree
 	while fs.is_scanning():
-		await tree.process_frame
+		await _tree.process_frame
 
-	var job: Dictionary = await dock.render_and_build(sbsar, Vector2i(10, 10), 42)
-	_expect(job.has("material"), "pipeline produced a material (%s)" % job.get("error", "ok"))
-	if not job.has("material"):
+	EditorInterface.open_scene_from_path(SCENE)
+	await _tree.process_frame
+	var root := EditorInterface.get_edited_scene_root()
+	var rock: MeshInstance3D = root.get_node_or_null("Rock") if root else null
+	_expect(rock != null, "test scene open with a Rock node")
+	if rock == null:
 		_quit()
 		return
 
-	var mat: StandardMaterial3D = job["material"]
-	var result = job["result"]
-	_expect(mat.resource_path.ends_with(".tres") and FileAccess.file_exists(mat.resource_path), "material saved: " + mat.resource_path)
-	_expect(mat.albedo_texture != null, "albedo wired")
-	_expect(mat.normal_enabled and mat.normal_texture != null, "normal wired")
-	_expect(mat.roughness_texture != null and mat.metallic_texture != null, "roughness + metallic wired")
+	# --- create
+	var gs: GraphSettings = await dock.create_material(sbsar, [rock] as Array[MeshInstance3D])
+	_expect(gs != null and gs.material != null, "created settings + material")
+	if gs == null or gs.material == null:
+		_quit()
+		return
+	_expect(rock.material_override == gs.material, "material applied to Rock")
+	_expect(Pipeline.settings_for_material(gs.material) == gs, "material links back to its settings")
+	_expect(gs.material.albedo_texture.get_width() == 512, "preview is 512 px")
+	if not gs.is_described():
+		await gs.description_loaded
 
-	if mat.normal_texture:
-		var cfg := ConfigFile.new()
-		cfg.load(mat.normal_texture.resource_path + ".import")
-		var flipped: bool = cfg.get_value("params", "process/normal_map_invert_y", false)
-		var nm: int = cfg.get_value("params", "compress/normal_map", 0)
-		_expect(nm == 1, "normal imported as normal map")
-		_expect(flipped == (result.normal_convention == "directx"),
-				"normal convention %s, green flip on import = %s" % [result.normal_convention, flipped])
-		var img := mat.normal_texture.get_image()
-		_expect(img != null and img.get_width() == 1024, "normal texture is 1024 px")
+	# --- generated properties
+	var props := {}
+	var groups := PackedStringArray()
+	for p in gs.get_property_list():
+		props[p["name"]] = p
+		if p["usage"] & PROPERTY_USAGE_GROUP:
+			groups.append(p["name"])
+	var dmg: Dictionary = props.get("tarmac_damage", {})
+	_expect(dmg.get("type") == TYPE_FLOAT and dmg.get("hint") == PROPERTY_HINT_RANGE and String(dmg.get("hint_string")).begins_with("0,1,0.01"),
+			"tarmac_damage is a 0-1 slider (%s)" % dmg.get("hint_string"))
+	_expect(props.get("asphalt_color", {}).get("type") == TYPE_COLOR, "asphalt_color is a colour")
+	_expect(props.get("painted_arrows", {}).get("type") == TYPE_BOOL, "painted_arrows is a toggle")
+	_expect(props.get("normal_format", {}).get("hint_string") == "DirectX:0,OpenGL:1", "normal_format is a dropdown")
+	_expect("Technical parameters" in groups and "Channels" in groups, "groups: %s" % ", ".join(groups))
+	_expect(props.has("preset"), "preset dropdown")
+	_expect(is_equal_approx(gs.get("tarmac_damage"), 0.6), "default value read from the graph")
+	_expect(props.has("signs_color"), "signs_color visible while painted_arrows is on")
 
-	_make_test_scene(mat)
+	# --- visibleif
+	gs.set("painted_arrows", false)
+	var names := gs.get_property_list().map(func(p: Dictionary) -> String: return p["name"])
+	_expect(not "signs_color" in names and not "tile_arrows" in names, "visibleif hides arrow parameters when painted_arrows is off")
+	gs.set("painted_arrows", true)
 
-	# Second run over the same name must update in place (reimport path).
-	var again: Dictionary = await dock.render_and_build(sbsar, Vector2i(10, 10), 42)
-	_expect(again.has("material") and again["material"].resource_path == mat.resource_path, "re-render updates the same material")
+	# --- auto preview on change
+	await _wait_idle(dock)
+	var before := _albedo_hash(gs)
+	var key_before := gs.last_render_key
+	gs.set("tarmac_damage", 0.05)
+	gs.set("asphalt_color", Color(0.45, 0.1, 0.08))
+	await _tree.process_frame
+	_expect(dock.is_busy(), "change schedules a preview")
+	await _wait_idle(dock)
+	_expect(gs.last_render_key != key_before and _albedo_hash(gs) != before, "preview re-rendered with new values")
+	_expect(gs.property_can_revert("tarmac_damage") and is_equal_approx(gs.property_get_revert("tarmac_damage"), 0.6), "revert to default available")
+
+	# --- unchanged inputs are skipped
+	var again: Dictionary = await Pipeline.new().render(gs, gs.preview_size)
+	_expect(again.get("skipped", false), "unchanged settings skip the render")
+
+	# --- preset
+	gs.set("preset", 1)  # "Pristine": tarmac_damage 0
+	_expect(is_equal_approx(gs.get("tarmac_damage"), 0.0), "preset applied (tarmac_damage %.2f)" % gs.get("tarmac_damage"))
+	gs.set("asphalt_color", Color(0.45, 0.1, 0.08))
+	await _wait_idle(dock)
+
+	# --- final
+	gs.final_size = 10  # keep the test quick: 1K
+	dock._queue(dock.Job.FINAL)
+	await _tree.process_frame
+	await _wait_idle(dock)
+	_expect(gs.material.albedo_texture.get_width() == 1024, "final render at 1K (%d px)" % gs.material.albedo_texture.get_width())
+
+	# --- reload from disk keeps the values
+	var reloaded := ResourceLoader.load(gs.resource_path, "", ResourceLoader.CACHE_MODE_IGNORE) as GraphSettings
+	_expect(reloaded != null and reloaded.values.has("asphalt_color") and reloaded.source == gs.source,
+			"saved settings reload with their values (%s)" % (str(reloaded.values.keys()) if reloaded else "null"))
+
+	# The scene is not saved: the committed test scene must not reference generated (git-ignored) files.
+	print("[selftest] settings: ", gs.resource_path)
 	_quit()
 
 
-func _make_test_scene(mat: Material) -> void:
-	var ps := load(ROCK_FBX) as PackedScene
-	if ps == null:
-		_expect(false, "rock FBX imported")
-		return
-	var inst := ps.instantiate()
-	var src := _find_mesh(inst)
-	if src == null:
-		_expect(false, "rock FBX contains a MeshInstance3D")
-		inst.free()
-		return
-	var xform := Transform3D.IDENTITY
-	var n: Node = src
-	while n != null and n is Node3D:
-		xform = (n as Node3D).transform * xform
-		n = n.get_parent()
-
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(TEST_DIR))
-	var mesh_path := TEST_DIR.path_join("rock01_mesh.res")
-	ResourceSaver.save(src.mesh.duplicate(), mesh_path)
-	var mesh := load(mesh_path) as Mesh
-	inst.free()
-
-	var root := Node3D.new()
-	root.name = "RockTest"
-
-	var env := Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.sky = Sky.new()
-	env.sky.sky_material = ProceduralSkyMaterial.new()
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	var we := WorldEnvironment.new()
-	we.name = "WorldEnvironment"
-	we.environment = env
-	root.add_child(we)
-
-	var sun := DirectionalLight3D.new()
-	sun.name = "Sun"
-	sun.shadow_enabled = true
-	sun.transform = Transform3D(Basis.from_euler(Vector3(deg_to_rad(-40), deg_to_rad(35), 0)), Vector3.ZERO)
-	root.add_child(sun)
-
-	var rock := MeshInstance3D.new()
-	rock.name = "Rock"
-	rock.mesh = mesh
-	rock.transform = xform
-	rock.material_override = mat
-	root.add_child(rock)
-
-	var aabb := xform * mesh.get_aabb()
-	var center := aabb.get_center()
-	var radius := aabb.size.length() * 0.5
-	var cam := Camera3D.new()
-	cam.name = "Camera3D"
-	var eye := center + Vector3(0.35, 0.45, 1.0).normalized() * radius * 2.4
-	cam.transform = Transform3D(Basis.looking_at(center - eye, Vector3.UP), eye)
-	cam.far = radius * 20.0
-	root.add_child(cam)
-
-	for c in root.get_children():
-		c.owner = root
-	var packed := PackedScene.new()
-	packed.pack(root)
-	var scene_path := TEST_DIR.path_join("rock_test.tscn")
-	var err := ResourceSaver.save(packed, scene_path)
-	root.free()
-	_expect(err == OK, "test scene saved: %s (rock size %.2f)" % [scene_path, aabb.size.length()])
+func _wait_idle(dock: Node) -> void:
+	var deadline := Time.get_ticks_msec() + WAIT_MS
+	await _tree.process_frame
+	while dock.is_busy() and Time.get_ticks_msec() < deadline:
+		await _tree.process_frame
 
 
-static func _find_mesh(node: Node) -> MeshInstance3D:
-	if node is MeshInstance3D:
-		return node
-	for c in node.get_children():
-		var m := _find_mesh(c)
-		if m:
-			return m
-	return null
+## Hash of the albedo PNG on disk (the headless dummy renderer cannot read textures back).
+func _albedo_hash(gs: GraphSettings) -> String:
+	return FileAccess.get_md5(ProjectSettings.globalize_path(gs.material.albedo_texture.resource_path))
 
 
 func _expect(cond: bool, what: String) -> void:
@@ -141,4 +130,4 @@ func _expect(cond: bool, what: String) -> void:
 
 func _quit() -> void:
 	print("[selftest] SELFTEST %s" % ("PASS" if _fails == 0 else "FAIL (%d)" % _fails))
-	(Engine.get_main_loop() as SceneTree).quit(0 if _fails == 0 else 1)
+	_tree.quit(0 if _fails == 0 else 1)

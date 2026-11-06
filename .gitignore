@@ -1,8 +1,11 @@
 # Godot import cache and editor state
 .godot/
 
-# Generated textures and materials (regenerable from the .sbsar + parameters)
-/substance_bridge/
+# Generated textures and materials (regenerable from the .sbsar + parameters).
+# The *_graph.tres settings are the source of truth (.sbsar path + changed values), so they are kept.
+/substance_bridge/**
+!/substance_bridge/**/
+!/substance_bridge/**/*_graph.tres
 
 # Step 1 validation output: bakes, renders, screenshots (see docs/validated-commands.md)
 /validation/

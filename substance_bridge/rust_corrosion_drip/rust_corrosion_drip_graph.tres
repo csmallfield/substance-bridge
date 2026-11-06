@@ -1,0 +1,18 @@
+[gd_resource type="Resource" format=3 uid="uid://ct7klu5gxcony"]
+
+[ext_resource type="Script" uid="uid://dg8yxrahx07ay" path="res://addons/substance_bridge/core/graph_settings.gd" id="1_udb8j"]
+
+[resource]
+script = ExtResource("1_udb8j")
+source = "C:/Program Files/Allegorithmic/Adobe Substance 3D for Maya/2022/sbsars/pounded_asphalt.sbsar"
+final_size = 12
+output_name = "rust_corrosion_drip"
+values = {
+"color": Color(0.382115, 0.401777, 0.413793, 1),
+"contrast": -0.31000000000000005,
+"hue_shift": 0.28,
+"luminosity": 0.36,
+"normal_intensity": 0.67,
+"paint_amount": 0.86,
+"paint_color": Color(0.574713, 0.263983, 0.289176, 1)
+}

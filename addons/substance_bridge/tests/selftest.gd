@@ -105,9 +105,26 @@ func run(dock: Node, sbsar: String) -> void:
 	_expect(reloaded != null and reloaded.values.has("asphalt_color") and reloaded.source == gs.source,
 			"saved settings reload with their values (%s)" % (str(reloaded.values.keys()) if reloaded else "null"))
 
-	# The scene is not saved: the committed test scene must not reference generated (git-ignored) files.
-	print("[selftest] settings: ", gs.resource_path)
+	var text := FileAccess.get_file_as_string(gs.resource_path)
+	_expect(not text.contains("last_render_key") and not text.contains("type=\"Material\""),
+			"saved settings hold no cache state or generated-file references")
+
+	# The scene is not saved: the committed test scene must not reference generated files.
+	# Remove this run's generated folder so test output never lands in git.
+	rock.material_override = null
+	var folder := gs.resource_path.get_base_dir()
+	_remove_dir(ProjectSettings.globalize_path(folder))
+	fs.scan()
+	print("[selftest] removed ", folder)
 	_quit()
+
+
+static func _remove_dir(abs_path: String) -> void:
+	for d in DirAccess.get_directories_at(abs_path):
+		_remove_dir(abs_path.path_join(d))
+	for f in DirAccess.get_files_at(abs_path):
+		DirAccess.remove_absolute(abs_path.path_join(f))
+	DirAccess.remove_absolute(abs_path)
 
 
 func _wait_idle(dock: Node) -> void:

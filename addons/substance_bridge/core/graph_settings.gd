@@ -52,16 +52,26 @@ const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_
 ## Re-render a preview automatically after each change.
 @export var auto_preview := true
 
-## The material this resource generates (saved next to it).
-@export var material: StandardMaterial3D
+## The material this resource generates: <output_name>.tres next to this file. Shown in the
+## inspector but not saved, so tracked settings never reference generated (git-ignored) files.
+@export_custom(PROPERTY_HINT_RESOURCE_TYPE, "StandardMaterial3D", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY)
+var material: StandardMaterial3D:
+	get:
+		if material == null and not output_name.is_empty() and not resource_path.is_empty():
+			var path := resource_path.get_base_dir().path_join(output_name + ".tres")
+			if ResourceLoader.exists(path):
+				material = ResourceLoader.load(path) as StandardMaterial3D
+		return material
 
 @export_storage var backend_id := "substance"
 ## Folder/file name used for the generated textures and material.
 @export_storage var output_name := ""
 ## Parameter id -> value, only for parameters changed from their defaults.
 @export_storage var values := {}
-## Hash of the inputs of the last render; identical inputs are not rendered again.
-@export_storage var last_render_key := ""
+
+## Hash of the inputs of the last render this session; identical inputs are not rendered
+## again. Not saved (it is cache state), so the first preview after a restart renders once.
+var last_render_key := ""
 
 var _description: GraphDescription
 var _describe_task: Task

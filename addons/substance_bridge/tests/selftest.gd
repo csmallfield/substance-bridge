@@ -135,18 +135,22 @@ func run(dock: Node, sbsar: String) -> void:
 		var batch: Dictionary = await dock.render_all(PackedStringArray([v0.resource_path, v1.resource_path]), 10)
 		_expect(batch["done"] == 2 and batch["failed"].is_empty(), "batch rendered %d, failed %s" % [batch["done"], str(batch["failed"])])
 		_expect(v0.material.albedo_texture.get_width() == 1024 and v1.material.albedo_texture.get_width() == 1024, "batch at 1K")
-		_cleanup(v0)
-		_cleanup(v1)
+		await _cleanup(v0)
+		await _cleanup(v1)
 	rock2.free()
 
 	# The scene is not saved: the committed test scene must not reference generated files.
 	# Remove this run's generated folder so test output never lands in git.
 	rock.material_override = null
-	_cleanup(gs)
+	await _cleanup(gs)
 
 	var mesh_sbsar := OS.get_environment("SUBSTANCE_BRIDGE_SELFTEST_MESH")
 	if not mesh_sbsar.is_empty():
 		await _mesh_adaptive(dock, rock, mesh_sbsar)
+	# Noise lab: needs a GPU, so only meaningful in a windowed editor.
+	var noise := OS.get_environment("SUBSTANCE_BRIDGE_SELFTEST_NOISE")
+	if not noise.is_empty():
+		await _noise_lab(dock, rock, noise)
 	fs.scan()
 	_quit()
 
@@ -191,12 +195,70 @@ func _mesh_adaptive(dock: Node, rock: MeshInstance3D, sbsar: String) -> void:
 	_expect(String(r.get("error", "")).contains("Bake from Selected Mesh"), "missing mesh is explained: %s" % r.get("error", "no error"))
 	if OS.get_environment("SUBSTANCE_BRIDGE_KEEP") != "1":
 		rock.material_override = null
-		_cleanup(gs)
+		await _cleanup(gs)
+
+
+## Native backend: the noise lab's Grunge Map (e.g. "grunge_014"), then Dirt 4.
+func _noise_lab(dock: Node, rock: MeshInstance3D, noise: String) -> void:
+	print("[selftest] noise lab: ", noise)
+	await _wait_idle(dock)
+	var gs: GraphSettings = await dock.create_material("noiselab://" + noise, [rock] as Array[MeshInstance3D])
+	_expect(gs != null and gs.backend_id == "noiselab" and gs.material != null, "noise lab material created (%s)" % (gs.backend_id if gs else "null"))
+	if gs == null or gs.material == null:
+		return
+	var m := gs.material
+	_expect(m.albedo_texture != null and m.normal_texture != null and m.heightmap_texture != null, "baseColor, normal and height wired")
+	_expect(m.albedo_texture.get_width() == 512, "noise preview at 512")
+	_expect(rock.material_override == m, "noise material applied to Rock")
+	var props := {}
+	for p in gs.get_property_list():
+		props[p["name"]] = p
+	_expect(props.get("balance", {}).get("hint") == PROPERTY_HINT_RANGE and props.get("invert", {}).get("type") == TYPE_BOOL
+			and props.has("normal_strength"), "generated sliders: balance, contrast, invert, normal strength")
+
+	var before := _albedo_hash(gs)
+	gs.set("balance", 0.8)
+	await _wait_idle(dock)
+	_expect(_albedo_hash(gs) != before, "changing balance re-renders the noise")
+
+	var variants: Array = await dock.make_variants(1, [] as Array[MeshInstance3D])
+	_expect(variants.size() == 1 and _albedo_hash(variants[0]) != _albedo_hash(gs), "noise seed variant renders differently")
+	# Drop every reference to the variants first, so nothing reloads their deleted textures.
+	var variant_folders := variants.map(func(v): return v.resource_path.get_base_dir())
+	variants.clear()
+	for folder: String in variant_folders:
+		await _cleanup_folder(folder)
+
+	var dirt: GraphSettings = await dock.create_material("noiselab://dirt_4", [rock] as Array[MeshInstance3D])
+	var dirt_props := dirt.get_property_list().map(func(p: Dictionary) -> String: return p["name"]) if dirt else []
+	_expect(dirt != null and dirt.material != null and "scale" in dirt_props and "disorder" in dirt_props, "standalone noise (dirt_4) with scale and disorder")
+	# Release every reference (scene, dock, test) before deleting, so nothing reloads the files.
+	rock.material_override = null
+	dock.current = null
+	dock.undo_redo.clear_history()  # the "Apply" actions hold the materials too
+	var folders := [gs.resource_path.get_base_dir()]
+	if dirt:
+		folders.append(dirt.resource_path.get_base_dir())
+	gs = null
+	dirt = null
+	for folder: String in folders:
+		await _cleanup_folder(folder)
 
 
 func _cleanup(gs: GraphSettings) -> void:
-	var folder := gs.resource_path.get_base_dir()
+	await _cleanup_folder(gs.resource_path.get_base_dir())
+
+
+func _cleanup_folder(folder: String) -> void:
+	if EditorInterface.get_inspector().get_edited_object() is GraphSettings:
+		EditorInterface.inspect_object(null)
 	_remove_dir(ProjectSettings.globalize_path(folder))
+	# Let the editor notice the deletion before anything else touches those files.
+	var fs := EditorInterface.get_resource_filesystem()
+	fs.scan()
+	await _tree.process_frame
+	while fs.is_scanning():
+		await _tree.process_frame
 	print("[selftest] removed ", folder)
 
 

@@ -10,7 +10,7 @@ extends Resource
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const Task := preload("res://addons/substance_bridge/core/task.gd")
 const GraphDescription := preload("res://addons/substance_bridge/backends/graph_description.gd")
-const SubstanceBackend := preload("res://addons/substance_bridge/backends/substance/substance_backend.gd")
+const Backends := preload("res://addons/substance_bridge/backends/backends.gd")
 const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
 
 ## Emitted when something that affects the rendered maps changes (debounced by the dock).
@@ -38,6 +38,7 @@ var source := "":
 		if not source.is_empty():
 			values.clear()
 		source = v
+		backend_id = Backends.id_for_source(v)
 		_description = null
 		_request_description()
 		notify_property_list_changed()
@@ -152,7 +153,7 @@ func get_value(id: String) -> Variant:
 func describe_blocking() -> void:
 	if source.is_empty():
 		return
-	var backend := SubstanceBackend.new(Settings.snapshot())
+	var backend := Backends.for_source(source, Settings.snapshot())
 	_set_description(backend.describe(source))
 
 
@@ -161,7 +162,7 @@ func describe_blocking() -> void:
 func _request_description() -> void:
 	if source.is_empty() or not Engine.is_editor_hint():
 		return
-	var backend := SubstanceBackend.new(Settings.snapshot())
+	var backend := Backends.for_source(source, Settings.snapshot())
 	var src := source
 	_describe_task = Task.new()
 	_describe_task.finished.connect(func(d: GraphDescription) -> void:

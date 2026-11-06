@@ -6,8 +6,13 @@ extends RefCounted
 ## parameter values into texture files keyed by usage. The dock, the future inspector
 ## and the material builder only talk to this interface, so a new backend gets them for free.
 ##
-## describe() and render() block and may run on a worker thread: implementations must not
-## touch the scene tree, EditorInterface or EditorSettings. Take settings in _init instead.
+## describe() blocks and may run on a worker thread: it must not touch the scene tree,
+## EditorInterface or EditorSettings. Take settings in _init instead.
+##
+## render() runs in one of two ways, chosen by runs_on_main_thread():
+## - false (external tools, e.g. sbsrender): render() blocks and runs on a worker thread.
+## - true (GPU work in the engine, e.g. the noise lab): render() is a coroutine called on the
+##   main thread; it may add nodes to the scene tree and await frames.
 
 const GraphDescription := preload("res://addons/substance_bridge/backends/graph_description.gd")
 const RenderRequest := preload("res://addons/substance_bridge/backends/render_request.gd")
@@ -26,6 +31,11 @@ func get_display_name() -> String:
 ## File extensions this backend opens, without the dot.
 func get_source_extensions() -> PackedStringArray:
 	return PackedStringArray()
+
+
+## True when render() must run on the main thread as a coroutine (see above).
+func runs_on_main_thread() -> bool:
+	return false
 
 
 ## Reasons the backend cannot run on this machine; empty when ready.

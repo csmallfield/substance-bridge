@@ -15,6 +15,7 @@ extends VBoxContainer
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
 const Pipeline := preload("res://addons/substance_bridge/core/pipeline.gd")
+const NoiseLabBackend := preload("res://addons/substance_bridge/backends/noiselab/noiselab_backend.gd")
 
 const LAST_SBSAR_META := "substance_bridge_last_sbsar"
 const PREVIEW_DELAY_SEC := 0.35
@@ -37,6 +38,9 @@ var _busy := false
 var _pending := Job.NONE
 var _debounce: Timer
 
+var _source_kind: OptionButton
+var _noise_option: OptionButton
+var _sbsar_row: HBoxContainer
 var _sbsar_edit: LineEdit
 var _create_button: Button
 var _current_label: Label
@@ -63,7 +67,16 @@ func _init() -> void:
 	_pipeline.log_callback = log_line
 
 	add_child(_heading("New material"))
+	_source_kind = OptionButton.new()
+	_source_kind.add_item("Substance (.sbsar)")
+	_source_kind.add_item("Noise Lab (native)")
+	_source_kind.item_selected.connect(func(_i: int) -> void: _refresh_source_rows())
+	add_child(_source_kind)
+	_noise_option = OptionButton.new()
+	_noise_option.tooltip_text = "Native Godot rebuilds of Substance noises and Grunge Maps (the noise lab)."
+	add_child(_noise_option)
 	var src_row := HBoxContainer.new()
+	_sbsar_row = src_row
 	_sbsar_edit = LineEdit.new()
 	_sbsar_edit.placeholder_text = ".sbsar file"
 	_sbsar_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -195,6 +208,26 @@ func _ready() -> void:
 			"substance_bridge", LAST_SBSAR_META, ""))
 	EditorInterface.get_inspector().edited_object_changed.connect(_on_inspector_object_changed)
 	EditorInterface.get_selection().selection_changed.connect(_on_selection_changed)
+	for n in NoiseLabBackend.noise_names():
+		_noise_option.add_item(n)
+	_refresh_source_rows()
+
+
+func _refresh_source_rows() -> void:
+	var noise := _source_kind.selected == 1
+	_sbsar_row.visible = not noise
+	_noise_option.visible = noise
+	if noise and _noise_option.item_count == 0:
+		set_status("The noise lab is not linked into this project (res://noiselab). See the README.")
+
+
+## The source the Create button would use: an .sbsar path or "noiselab://<noise>".
+func _chosen_source() -> String:
+	if _source_kind.selected == 1:
+		if _noise_option.item_count == 0:
+			return ""
+		return NoiseLabBackend.SCHEME + _noise_option.get_item_text(_noise_option.selected)
+	return _sbsar_edit.text.strip_edges()
 
 
 func set_status(text: String) -> void:
@@ -237,7 +270,7 @@ func _on_create_pressed() -> void:
 	if targets.is_empty():
 		set_status("Select one or more MeshInstance3D nodes first.")
 		return
-	await create_material(_sbsar_edit.text.strip_edges(), targets)
+	await create_material(_chosen_source(), targets)
 
 
 ## Creates settings for an .sbsar, renders a preview and applies the material to targets.
@@ -246,10 +279,12 @@ func create_material(sbsar: String, targets: Array[MeshInstance3D]) -> GraphSett
 	if _busy:
 		set_status("Busy; try again when the current render finishes.")
 		return null
-	if not FileAccess.file_exists(sbsar):
-		set_status("Choose an existing .sbsar file.")
+	var is_noise := sbsar.begins_with(NoiseLabBackend.SCHEME)
+	if sbsar.is_empty() or (not is_noise and not FileAccess.file_exists(sbsar)):
+		set_status("Choose an existing .sbsar file." if not is_noise else "Choose a noise.")
 		return null
-	EditorInterface.get_editor_settings().set_project_metadata("substance_bridge", LAST_SBSAR_META, sbsar)
+	if not is_noise:
+		EditorInterface.get_editor_settings().set_project_metadata("substance_bridge", LAST_SBSAR_META, sbsar)
 	var gs := _pipeline.create_settings(sbsar)
 	if gs == null:
 		set_status("Could not create the settings resource. See the log.")

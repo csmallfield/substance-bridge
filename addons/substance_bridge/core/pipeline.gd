@@ -8,7 +8,8 @@ extends RefCounted
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const Task := preload("res://addons/substance_bridge/core/task.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
-const SubstanceBackend := preload("res://addons/substance_bridge/backends/substance/substance_backend.gd")
+const Backends := preload("res://addons/substance_bridge/backends/backends.gd")
+const TextureBackend := preload("res://addons/substance_bridge/backends/texture_backend.gd")
 const RenderRequest := preload("res://addons/substance_bridge/backends/render_request.gd")
 const RenderResult := preload("res://addons/substance_bridge/backends/render_result.gd")
 const MaterialBuilder := preload("res://addons/substance_bridge/material/material_builder.gd")
@@ -96,7 +97,7 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 		return {"material": gs.material, "skipped": true, "seconds": 0.0}
 
 	var config := Settings.snapshot()
-	var backend := SubstanceBackend.new(config)
+	var backend := Backends.create(gs.backend_id, config)
 	var problems := backend.check_available()
 	if not problems.is_empty():
 		return {"error": "; ".join(problems)}
@@ -116,10 +117,15 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 	var sbsbaker := String(config["sbsbaker"])
 
 	var started := Time.get_ticks_msec()
-	var task := Task.new()
-	task.start(func() -> RenderResult:
-		return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir, force))
-	var result: RenderResult = await task.finished
+	var result: RenderResult
+	if backend.runs_on_main_thread():
+		# GPU work inside the engine (noise lab): a coroutine on the main thread. No mesh maps.
+		result = await backend.render(request)
+	else:
+		var task := Task.new()
+		task.start(func() -> RenderResult:
+			return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir, force))
+		result = await task.finished
 	for cmd in result.commands:
 		_log(cmd)
 	for w in result.warnings:
@@ -153,7 +159,7 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 
 ## Worker thread: bakes the mesh maps the graph takes (cached), wires them to its image
 ## inputs by usage, then renders.
-static func _bake_and_render(backend: SubstanceBackend, request: RenderRequest, sbsbaker: String,
+static func _bake_and_render(backend: TextureBackend, request: RenderRequest, sbsbaker: String,
 		mesh_obj: String, bake_size: int, bake_dir: String, force_bake: bool = false) -> RenderResult:
 	if request.description == null:
 		request.description = backend.describe(request.source)

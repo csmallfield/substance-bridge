@@ -9,3 +9,6 @@
 
 # Step 1 validation output: bakes, renders, screenshots (see docs/validated-commands.md)
 /validation/
+
+# Junction to the noise lab's generators (D:\01_github\sd-mm-noise-lab\godot\noiselab); see README
+/noiselab

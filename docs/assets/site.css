@@ -372,5 +372,6 @@ dialog.lightbox img {
   }
   main { padding: 16px 16px 72px; }
   h1 { font-size: 1.8rem; }
-  .pair, .side { grid-template-columns: 1fr; }
+  /* minmax(0, ...): a plain 1fr column can't shrink below a wide image's natural width. */
+  .pair, .side, .pair:has(img.ui) { grid-template-columns: minmax(0, 1fr); }
 }

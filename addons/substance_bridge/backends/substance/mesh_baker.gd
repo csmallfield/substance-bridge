@@ -32,7 +32,7 @@ static func supported_usages() -> PackedStringArray:
 ## {"maps": {usage: abs path}, "errors": PackedStringArray, "commands": PackedStringArray,
 ##  "baked": int (maps actually baked, not from cache), "seconds": float}.
 static func bake(sbsbaker: String, obj_path: String, usages: PackedStringArray,
-		size_log2: int, out_dir: String, parallel: bool = true) -> Dictionary:
+		size_log2: int, out_dir: String, parallel: bool = true, force: bool = false) -> Dictionary:
 	var started := Time.get_ticks_msec()
 	var out := {"maps": {}, "errors": PackedStringArray(), "commands": PackedStringArray(), "baked": 0}
 	DirAccess.make_dir_recursive_absolute(out_dir)
@@ -43,6 +43,8 @@ static func bake(sbsbaker: String, obj_path: String, usages: PackedStringArray,
 			out["errors"].append("No baker for usage \"%s\"" % usage)
 			continue
 		var file := out_dir.path_join(usage + ".png")
+		if force and FileAccess.file_exists(file):
+			DirAccess.remove_absolute(file)
 		if FileAccess.file_exists(file):
 			out["maps"][usage] = file
 			continue

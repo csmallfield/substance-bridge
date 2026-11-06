@@ -26,7 +26,11 @@ const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_
 		"bake_size", "baked_mesh", "mesh_obj",
 		"script", "resource_name", "resource_path", "resource_local_to_scene", "resource_scene_unique_id"]
 
-@export_global_file("*.sbsar") var source := "":
+## The .sbsar this material is generated from. Read-only in the inspector: the folder,
+## material name and parameter values all belong to this graph. To try another .sbsar on
+## the same mesh, create a new material from the dock.
+@export_custom(PROPERTY_HINT_GLOBAL_FILE, "*.sbsar", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY)
+var source := "":
 	set(v):
 		if v == source:
 			return
@@ -123,6 +127,13 @@ func mesh_usages() -> PackedStringArray:
 			if u in MeshBaker.BAKERS and not u in usages:
 				usages.append(u)
 	return usages
+
+
+## True when the output name no longer starts with the .sbsar's name (the source was
+## changed after creation, e.g. in an older version that allowed editing it).
+func is_name_mismatched() -> bool:
+	var base := source.get_file().get_basename().validate_filename()
+	return not source.is_empty() and not output_name.begins_with(base)
 
 
 func size_name(size_log2: int) -> String:

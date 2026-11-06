@@ -24,20 +24,41 @@ var log_callback: Callable
 ## Creates a GraphSettings resource for an .sbsar, saved under the output folder with a
 ## unique name. Returns null if it could not be saved.
 func create_settings(sbsar: String, random_seed: int = 0) -> GraphSettings:
-	var config := Settings.snapshot()
-	var folder := String(config["output_folder"])
-	var base := sbsar.get_file().get_basename().validate_filename()
+	var gs := GraphSettings.new()
+	gs.random_seed = random_seed
+	gs.source = sbsar
+	return _save_new(gs, sbsar.get_file().get_basename().validate_filename())
+
+
+## A variant: a copy of gs (same .sbsar, values, mesh and sizes) with another seed, saved
+## under its own name ("<name>_seed<seed>"). Returns null if it could not be saved.
+func duplicate_settings(gs: GraphSettings, random_seed: int) -> GraphSettings:
+	var v := GraphSettings.new()
+	v.source = gs.source
+	v.values = gs.values.duplicate(true)
+	v.random_seed = random_seed
+	v.preview_size = gs.preview_size
+	v.final_size = gs.final_size
+	v.bake_size = gs.bake_size
+	v.auto_preview = gs.auto_preview
+	v.mesh_obj = gs.mesh_obj
+	v.baked_mesh = gs.baked_mesh
+	var base := gs.output_name
+	var m := RegEx.create_from_string("_seed\\d+$").search(base)
+	if m:
+		base = base.substr(0, m.get_start())
+	return _save_new(v, "%s_seed%d" % [base, random_seed])
+
+
+func _save_new(gs: GraphSettings, base: String) -> GraphSettings:
+	var folder := String(Settings.snapshot()["output_folder"])
 	var name := base
 	var n := 2
 	while DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(folder.path_join(name))):
 		name = "%s_%d" % [base, n]
 		n += 1
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(folder.path_join(name)))
-
-	var gs := GraphSettings.new()
 	gs.output_name = name
-	gs.random_seed = random_seed
-	gs.source = sbsar
 	var path := folder.path_join(name).path_join(name + "_graph.tres")
 	var err := ResourceSaver.save(gs, path)
 	if err != OK:
@@ -48,11 +69,30 @@ func create_settings(sbsar: String, random_seed: int = 0) -> GraphSettings:
 	return gs
 
 
+## Every graph settings file under a folder (res:// path), sorted.
+static func find_all_settings(folder: String) -> PackedStringArray:
+	var found := PackedStringArray()
+	_find_settings(folder, found)
+	found.sort()
+	return found
+
+
+static func _find_settings(dir: String, found: PackedStringArray) -> void:
+	if not DirAccess.dir_exists_absolute(dir):
+		return
+	for f in DirAccess.get_files_at(dir):
+		if f.ends_with("_graph.tres"):
+			found.append(dir.path_join(f))
+	for d in DirAccess.get_directories_at(dir):
+		_find_settings(dir.path_join(d), found)
+
+
 ## Renders at size_log2 (e.g. 9 = 512) and builds/updates the material.
+## force: render even if nothing changed, and re-bake mesh maps instead of using the cache.
 ## Returns {"material": StandardMaterial3D, "skipped": bool, "seconds": float} or {"error": String}.
-func render(gs: GraphSettings, size_log2: int) -> Dictionary:
+func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionary:
 	var key := gs.render_key(size_log2)
-	if key == gs.last_render_key and gs.material != null:
+	if not force and key == gs.last_render_key and gs.material != null:
 		return {"material": gs.material, "skipped": true, "seconds": 0.0}
 
 	var config := Settings.snapshot()
@@ -78,7 +118,7 @@ func render(gs: GraphSettings, size_log2: int) -> Dictionary:
 	var started := Time.get_ticks_msec()
 	var task := Task.new()
 	task.start(func() -> RenderResult:
-		return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir))
+		return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir, force))
 	var result: RenderResult = await task.finished
 	for cmd in result.commands:
 		_log(cmd)
@@ -114,7 +154,7 @@ func render(gs: GraphSettings, size_log2: int) -> Dictionary:
 ## Worker thread: bakes the mesh maps the graph takes (cached), wires them to its image
 ## inputs by usage, then renders.
 static func _bake_and_render(backend: SubstanceBackend, request: RenderRequest, sbsbaker: String,
-		mesh_obj: String, bake_size: int, bake_dir: String) -> RenderResult:
+		mesh_obj: String, bake_size: int, bake_dir: String, force_bake: bool = false) -> RenderResult:
 	if request.description == null:
 		request.description = backend.describe(request.source)
 	var desc := request.description
@@ -130,7 +170,8 @@ static func _bake_and_render(backend: SubstanceBackend, request: RenderRequest, 
 				missing.errors.append("This graph takes mesh maps (%s). Select the mesh and press \"Bake from Selected Mesh\"."
 						% ", ".join(PackedStringArray(wanted.keys())))
 				return missing
-			var baked := MeshBaker.bake(sbsbaker, mesh_obj, PackedStringArray(wanted.keys()), bake_size, bake_dir)
+			var baked := MeshBaker.bake(sbsbaker, mesh_obj, PackedStringArray(wanted.keys()), bake_size,
+					bake_dir, true, force_bake)
 			if not baked["errors"].is_empty():
 				var failed := RenderResult.new()
 				failed.commands.append_array(baked["commands"])

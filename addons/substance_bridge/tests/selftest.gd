@@ -113,6 +113,32 @@ func run(dock: Node, sbsar: String) -> void:
 	_expect(not text.contains("last_render_key") and not text.contains("type=\"Material\""),
 			"saved settings hold no cache state or generated-file references")
 
+	var source_prop := gs.get_property_list().filter(func(p: Dictionary) -> bool: return p["name"] == "source")
+	_expect(not source_prop.is_empty() and source_prop[0]["usage"] & PROPERTY_USAGE_READ_ONLY, "source is read-only in the inspector")
+
+	# --- seed variants, one per selected mesh
+	var rock2 := rock.duplicate() as MeshInstance3D
+	rock2.name = "Rock2"
+	rock.get_parent().add_child(rock2)
+	rock2.owner = rock.owner
+	await _wait_idle(dock)
+	var variants: Array = await dock.make_variants(2, [rock, rock2] as Array[MeshInstance3D])
+	_expect(variants.size() == 2, "made 2 variants: %s" % ", ".join(variants.map(func(v): return v.output_name)))
+	if variants.size() == 2:
+		var v0: GraphSettings = variants[0]
+		var v1: GraphSettings = variants[1]
+		_expect(v0.random_seed != v1.random_seed and v0.values == gs.values, "variants keep the values, change the seed (%d, %d)" % [v0.random_seed, v1.random_seed])
+		_expect(_albedo_hash(v0) != _albedo_hash(v1), "variants render differently")
+		_expect(rock.material_override == v0.material and rock2.material_override == v1.material, "each selected mesh got its own variant")
+
+		# --- batch render at a fixed size
+		var batch: Dictionary = await dock.render_all(PackedStringArray([v0.resource_path, v1.resource_path]), 10)
+		_expect(batch["done"] == 2 and batch["failed"].is_empty(), "batch rendered %d, failed %s" % [batch["done"], str(batch["failed"])])
+		_expect(v0.material.albedo_texture.get_width() == 1024 and v1.material.albedo_texture.get_width() == 1024, "batch at 1K")
+		_cleanup(v0)
+		_cleanup(v1)
+	rock2.free()
+
 	# The scene is not saved: the committed test scene must not reference generated files.
 	# Remove this run's generated folder so test output never lands in git.
 	rock.material_override = null
@@ -152,6 +178,13 @@ func _mesh_adaptive(dock: Node, rock: MeshInstance3D, sbsar: String) -> void:
 	await _wait_idle(dock)
 	_expect(FileAccess.file_exists(bakes.path_join("%s_10" % key).path_join("curvature.png")), "changing the bake size re-bakes at 1K")
 
+	# --- batch with forced re-bake
+	var ao_file := bakes.path_join("%s_10" % key).path_join("ambientOcclusion.png")
+	var ao_time := FileAccess.get_modified_time(ao_file)
+	await _wait_seconds(1.1)  # file times have 1 s resolution
+	var batch: Dictionary = await dock.render_all(PackedStringArray([gs.resource_path]), dock.SIZE_PREVIEW, true)
+	_expect(batch["done"] == 1 and FileAccess.get_modified_time(ao_file) > ao_time, "batch with re-bake re-bakes the mesh maps")
+
 	gs.auto_preview = false
 	gs.mesh_obj = ""
 	var r: Dictionary = await Pipeline.new().render(gs, gs.preview_size)
@@ -173,6 +206,10 @@ static func _remove_dir(abs_path: String) -> void:
 	for f in DirAccess.get_files_at(abs_path):
 		DirAccess.remove_absolute(abs_path.path_join(f))
 	DirAccess.remove_absolute(abs_path)
+
+
+func _wait_seconds(seconds: float) -> void:
+	await _tree.create_timer(seconds).timeout
 
 
 func _wait_idle(dock: Node) -> void:

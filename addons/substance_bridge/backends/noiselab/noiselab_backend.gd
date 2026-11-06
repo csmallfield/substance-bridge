@@ -14,6 +14,9 @@ const GENERATOR := "res://noiselab/grunge_generator.gd"
 const STANDALONE := "res://noiselab/standalone.gd"
 
 const RENDER_TIMEOUT_MS := 60000
+## Live previews render this many passes per frame (up to 1K): the frame wait, not the GPU,
+## limits small renders. grunge_014 at 512: ~330 ms at the default 8, ~130 ms at 128.
+const LIVE_PASSES_PER_FRAME := 128
 
 ## Standalone noises that need input textures; not offered here.
 const EXCLUDED := ["upscale_1", "upscale_2", "upscale_3"]
@@ -168,64 +171,20 @@ static func _param(id: String, type: String, default: Variant, min_v: float = 0.
 
 
 ## Main thread, coroutine. Renders the noise and writes baseColor/height/normal files.
+func supports_live() -> bool:
+	return true
+
+
 func render(request: RenderRequest) -> RenderResult:
 	var res := RenderResult.new()
 	var started := Time.get_ticks_msec()
-	var problems := check_available()
-	if not problems.is_empty():
-		res.errors.append_array(problems)
+	var out: Dictionary = await generate_images(request)
+	res.commands.append_array(out["commands"])
+	res.errors.append_array(out["errors"])
+	if not res.errors.is_empty():
 		return res
-	var desc := request.description if request.description else describe(request.source)
-	if not desc.is_ok():
-		res.errors.append_array(desc.errors)
-		return res
-
-	var noise := noise_of(request.source)
-	var size := Vector2i(1 << request.size_log2.x, 1 << request.size_log2.y)
-	var settings := {}
-	for p in desc.params:
-		var id: String = p["id"]
-		var v: Variant = request.values.get(id, _default_value(p))
-		settings[id] = v
-	var strength := float(settings.get("normal_strength", 4.0))
-	res.commands.append("noiselab %s %dx%d seed %d %s" % [noise, size.x, size.y, request.random_seed, str(request.values)])
-
-	# The generator's passes wait for RenderingServer.frame_post_draw. The editor only draws when
-	# something changes (low-processor mode), so draw every frame while the noise renders.
-	var low_processor := OS.low_processor_usage_mode
-	OS.low_processor_usage_mode = false
-	var tree := Engine.get_main_loop() as SceneTree
-	var gen: Node = load(GENERATOR).new()
-	tree.root.add_child(gen)
-	var out := {}
-	var work := func() -> void:
-		var img: Image
-		if noise.begins_with("grunge_"):
-			img = await gen.generate(int(noise.trim_prefix("grunge_")), size, request.random_seed,
-					float(settings["balance"]), float(settings["contrast"]), bool(settings["invert"]))
-		else:
-			img = await gen.generate_noise(noise, size, request.random_seed, settings)
-		out["image"] = img
-		if img:
-			out["normal"] = await gen.make_normal(img, strength)
-		out["done"] = true
-	work.call()
-	# A minimised or headless editor never draws, so the passes would wait forever.
-	var deadline := Time.get_ticks_msec() + RENDER_TIMEOUT_MS
-	while not out.has("done") and Time.get_ticks_msec() < deadline:
-		await tree.process_frame
-	OS.low_processor_usage_mode = low_processor
-	if not out.has("done"):
-		gen.queue_free()  # also abandons the pending passes
-		res.errors.append("The noise lab did not finish %s within %d s. It renders on the GPU through the editor window, so keep the editor visible (not minimised, not headless)."
-				% [noise, RENDER_TIMEOUT_MS / 1000])
-		return res
-	gen.queue_free()
-	var image: Image = out.get("image")
-	var normal: Image = out.get("normal")
-	if image == null or normal == null:
-		res.errors.append("The noise lab could not render %s at %dx%d (see the Output panel)." % [noise, size.x, size.y])
-		return res
+	var image: Image = out["height"]
+	var normal: Image = out["normal"]
 
 	DirAccess.make_dir_recursive_absolute(request.output_dir)
 	var files := {
@@ -234,7 +193,7 @@ func render(request: RenderRequest) -> RenderResult:
 		"normal": request.output_dir.path_join("normal.png"),
 	}
 	var errs := [
-		load(GENERATOR).to_display(image).save_png(files["baseColor"]),
+		(out["baseColor"] as Image).save_png(files["baseColor"]),
 		image.save_exr(files["height"], true),
 		normal.save_png(files["normal"]),
 	]
@@ -250,7 +209,74 @@ func render(request: RenderRequest) -> RenderResult:
 	return res
 
 
-## Godot value for a parameter's default (bool for toggles).
+## Renders the maps into memory, without writing files. Used by render() and by the live
+## preview. Returns {"baseColor": Image (L8), "height": Image (RF), "normal": Image (RGBA8,
+## OpenGL), "commands": PackedStringArray, "errors": PackedStringArray}; the images are
+## missing when errors is not empty.
+func generate_images(request: RenderRequest, live := false) -> Dictionary:
+	var out := {"commands": PackedStringArray(), "errors": PackedStringArray()}
+	var problems := check_available()
+	if not problems.is_empty():
+		out["errors"].append_array(problems)
+		return out
+	var desc := request.description if request.description else describe(request.source)
+	if not desc.is_ok():
+		out["errors"].append_array(desc.errors)
+		return out
+
+	var noise := noise_of(request.source)
+	var size := Vector2i(1 << request.size_log2.x, 1 << request.size_log2.y)
+	var settings := {}
+	for p in desc.params:
+		var id: String = p["id"]
+		var v: Variant = request.values.get(id, _default_value(p))
+		settings[id] = v
+	var strength := float(settings.get("normal_strength", 4.0))
+	out["commands"].append("noiselab %s %dx%d seed %d %s" % [noise, size.x, size.y, request.random_seed, str(request.values)])
+
+	# The generator's passes wait for RenderingServer.frame_post_draw. The editor only draws when
+	# something changes (low-processor mode), so draw every frame while the noise renders.
+	var low_processor := OS.low_processor_usage_mode
+	OS.low_processor_usage_mode = false
+	var tree := Engine.get_main_loop() as SceneTree
+	var gen: Node = load(GENERATOR).new()
+	if live and size.x <= 1024 and "passes_per_frame" in gen:  # older noise labs lack it
+		gen.passes_per_frame = LIVE_PASSES_PER_FRAME
+	tree.root.add_child(gen)
+	var state := {}
+	var work := func() -> void:
+		var img: Image
+		if noise.begins_with("grunge_"):
+			img = await gen.generate(int(noise.trim_prefix("grunge_")), size, request.random_seed,
+					float(settings["balance"]), float(settings["contrast"]), bool(settings["invert"]))
+		else:
+			img = await gen.generate_noise(noise, size, request.random_seed, settings)
+		state["image"] = img
+		if img:
+			state["normal"] = await gen.make_normal(img, strength)
+		state["done"] = true
+	work.call()
+	# A minimised or headless editor never draws, so the passes would wait forever.
+	var deadline := Time.get_ticks_msec() + RENDER_TIMEOUT_MS
+	while not state.has("done") and Time.get_ticks_msec() < deadline:
+		await tree.process_frame
+	OS.low_processor_usage_mode = low_processor
+	gen.queue_free()  # also abandons any pending passes
+	if not state.has("done"):
+		out["errors"].append("The noise lab did not finish %s within %d s. It renders on the GPU through the editor window, so keep the editor visible (not minimised, not headless)."
+				% [noise, RENDER_TIMEOUT_MS / 1000])
+		return out
+	var image: Image = state.get("image")
+	var normal: Image = state.get("normal")
+	if image == null or normal == null:
+		out["errors"].append("The noise lab could not render %s at %dx%d (see the Output panel)." % [noise, size.x, size.y])
+		return out
+	out["baseColor"] = load(GENERATOR).to_display(image)
+	out["height"] = image
+	out["normal"] = normal
+	return out
+
+
 static func _default_value(p: Dictionary) -> Variant:
 	var raw: String = p["default"]
 	match p["type"]:

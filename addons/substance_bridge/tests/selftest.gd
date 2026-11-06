@@ -233,6 +233,28 @@ func _noise_lab(dock: Node, rock: MeshInstance3D, noise: String) -> void:
 	await _wait_idle(dock)
 	_expect(_albedo_hash(gs) != before, "changing balance re-renders the noise")
 
+	# Live preview: a drag of 12 changes, one per frame. The material updates in memory
+	# (ImageTexture) long before the file render; that render then puts imported textures back.
+	var committed := _albedo_hash(gs)
+	var times: Array[int] = []
+	var on_live := func(_g, msec: int, _e: String) -> void: times.append(msec)
+	dock._live.updated.connect(on_live)
+	var drag_started := Time.get_ticks_msec()
+	for i in 12:
+		gs.set("balance", 0.3 + i * 0.02)
+		await _tree.process_frame
+	while dock._live.is_running():
+		await _tree.process_frame
+	var drag_ms := Time.get_ticks_msec() - drag_started
+	dock._live.updated.disconnect(on_live)
+	_expect(m.albedo_texture is ImageTexture and _albedo_hash(gs) != committed and not dock._debounce.is_stopped(),
+			"live preview updates the material in memory before the file render")
+	print("[selftest] live: %d updates for 12 changes in %d ms, each %s ms" % [times.size(), drag_ms, str(times)])
+	_expect(times.size() >= 2 and times.size() < 12, "live preview coalesces a drag (%d updates)" % times.size())
+	await _wait_idle(dock)
+	_expect(m.albedo_texture is CompressedTexture2D and m.albedo_texture.resource_path.ends_with("_baseColor.png"),
+			"after the pause the imported maps replace the live textures")
+
 	var variants: Array = await dock.make_variants(1, [] as Array[MeshInstance3D])
 	_expect(variants.size() == 1 and _albedo_hash(variants[0]) != _albedo_hash(gs), "noise seed variant renders differently")
 	# Drop every reference to the variants first, so nothing reloads their deleted textures.
@@ -262,6 +284,7 @@ func _cleanup(gs: GraphSettings) -> void:
 
 
 func _cleanup_folder(folder: String) -> void:
+	await _wait_seconds(0.5)  # let editor jobs (thumbnails, imports) finish reading the files
 	if EditorInterface.get_inspector().get_edited_object() is GraphSettings:
 		EditorInterface.inspect_object(null)
 	_remove_dir(ProjectSettings.globalize_path(folder))
@@ -295,7 +318,10 @@ func _wait_idle(dock: Node) -> void:
 
 ## Hash of the albedo PNG on disk (the headless dummy renderer cannot read textures back).
 func _albedo_hash(gs: GraphSettings) -> String:
-	return FileAccess.get_md5(ProjectSettings.globalize_path(gs.material.albedo_texture.resource_path))
+	var tex := gs.material.albedo_texture
+	if tex.resource_path.is_empty():  # a live ImageTexture
+		return str(hash(tex.get_image().get_data()))
+	return FileAccess.get_md5(ProjectSettings.globalize_path(tex.resource_path))
 
 
 func _expect(cond: bool, what: String) -> void:

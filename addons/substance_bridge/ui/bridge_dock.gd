@@ -16,9 +16,13 @@ const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
 const Pipeline := preload("res://addons/substance_bridge/core/pipeline.gd")
 const NoiseLabBackend := preload("res://addons/substance_bridge/backends/noiselab/noiselab_backend.gd")
+const LivePreview := preload("res://addons/substance_bridge/core/live_preview.gd")
 
 const LAST_SBSAR_META := "substance_bridge_last_sbsar"
 const PREVIEW_DELAY_SEC := 0.35
+## Live sources (noise lab) update the material in memory on every change; the file render
+## and import that make it permanent wait for a longer pause.
+const LIVE_COMMIT_DELAY_SEC := 1.5
 
 enum Job { NONE, PREVIEW, FINAL }
 
@@ -34,6 +38,7 @@ var current: GraphSettings:
 	set = set_current
 
 var _pipeline := Pipeline.new()
+var _live := LivePreview.new()
 var _busy := false
 var _pending := Job.NONE
 var _debounce: Timer
@@ -65,6 +70,7 @@ func _init() -> void:
 	name = "Substance Bridge"
 	custom_minimum_size = Vector2(240, 0)
 	_pipeline.log_callback = log_line
+	_live.updated.connect(_on_live_updated)
 
 	add_child(_heading("New material"))
 	_source_kind = OptionButton.new()
@@ -241,7 +247,7 @@ func log_line(text: String) -> void:
 
 
 func is_busy() -> bool:
-	return _busy or _pending != Job.NONE or not _debounce.is_stopped()
+	return _busy or _pending != Job.NONE or not _debounce.is_stopped() or _live.is_running()
 
 
 func set_current(gs: GraphSettings) -> void:
@@ -425,8 +431,20 @@ func apply_material(mat: Material, targets: Array[MeshInstance3D]) -> void:
 
 func _on_parameters_changed() -> void:
 	if current and current.auto_preview:
-		_debounce.start()
+		if LivePreview.supports(current):
+			_live.request(current)
+			_debounce.start(LIVE_COMMIT_DELAY_SEC)
+		else:
+			_debounce.start(PREVIEW_DELAY_SEC)
 	_refresh()
+
+
+func _on_live_updated(gs: GraphSettings, msec: int, error: String) -> void:
+	if not error.is_empty():
+		set_status("Live preview failed: %s" % error)
+	elif not _busy:
+		set_status("Live %s at %s (%d ms); saving the maps after a pause." % [gs.output_name,
+				gs.size_name(gs.preview_size), msec])
 
 
 func _queue(job: Job) -> void:

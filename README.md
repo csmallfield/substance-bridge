@@ -30,6 +30,8 @@ failure modes the plugin guards against.
 
    The generators render on the GPU through the editor window, so keep the editor visible
    (not minimised) while a noise renders; a render that cannot draw times out after 60 s.
+   Live previews use the generator's passes_per_frame (sd-mm-noise-lab, Nov 2026) to render
+   more passes per frame; an older noise lab still works, at about half the live update rate.
 
 ## Use
 
@@ -37,7 +39,9 @@ In the Substance Bridge dock (top-right, beside the Inspector):
 
 - **Create and Apply to Selected**: choose an `.sbsar` or a noise, select MeshInstance3D nodes, click.
   Mesh-adaptive graphs bake their mesh maps from the first selected mesh.
-- Edit the parameters in the Inspector; a preview re-renders shortly after each change.
+- Edit the parameters in the Inspector; a preview re-renders shortly after each change. Noise Lab
+  materials also update **live** while you drag: the maps go straight into the material in memory
+  (about 0.15 s per update at 512), and the files are written and imported after a 1.5 s pause.
 - **Render Final**, **Make Seed Variants** (one per selected mesh), **Render All** (every material,
   any size, optional re-bake).
 

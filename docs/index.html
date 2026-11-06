@@ -27,6 +27,7 @@
     <li><a href="#mesh-maps">Mesh-adaptive graphs</a></li>
     <li><a href="#native-baker">Native baker</a></li>
     <li><a href="#noise-lab">Noise Lab</a></li>
+    <li class="sub"><a href="#noise-live">Live editing</a></li>
     <li><a href="#files">Where files go</a></li>
     <li><a href="#settings">Settings reference</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -202,7 +203,7 @@
 <div class="side">
   <div>
     <ul>
-      <li><strong>Auto preview on change</strong> (on by default) re-renders at the preview size 0.35 s after your last change. Several quick changes give one render.</li>
+      <li><strong>Auto preview on change</strong> (on by default) re-renders at the preview size 0.35 s after your last change. Several quick changes give one render. Noise Lab materials go further and update live while you drag (see <a href="#noise-live">Live editing</a>).</li>
       <li><strong>Preview</strong> renders now at the preview size (256, 512, 1K or 2K; 512 by default).</li>
       <li><strong>Render Final</strong> renders at the final size (512, 1K, 2K or 4K; 2K by default). The button shows the size.</li>
       <li>If nothing that affects the maps has changed since the last render at that size, the render is skipped and the dock says it's up to date.</li>
@@ -353,7 +354,7 @@
 <!-- ============================================================ -->
 <h2 id="noise-lab">Noise Lab</h2>
 
-<p>Set the dock's source to <strong>Noise Lab (native)</strong> and pick a noise: Grunge Maps 001–015, or standalone noises such as <code>dirt_1</code>–<code>dirt_5</code>, <code>moisture_noise</code>, <code>fluid</code>, <code>cells_1</code>–<code>cells_4</code>, <code>perlin_noise</code> and the fur, fibre and directional noises. These are Godot rebuilds of Substance Designer's noises, so they render on your GPU inside the editor, about 0.5 s at 512.</p>
+<p>Set the dock's source to <strong>Noise Lab (native)</strong> and pick a noise: Grunge Maps 001–015, or standalone noises such as <code>dirt_1</code>–<code>dirt_5</code>, <code>moisture_noise</code>, <code>fluid</code>, <code>cells_1</code>–<code>cells_4</code>, <code>perlin_noise</code> and the fur, fibre and directional noises. These are Godot rebuilds of Substance Designer's noises, so they render on your GPU inside the editor, about 0.5 s at 512, and fast enough to edit live.</p>
 
 <div class="pair">
   <figure>
@@ -378,6 +379,12 @@
 </div>
 
 <p>Each noise renders three maps: a greyscale <strong>albedo</strong>, a full-precision <strong>height</strong> (EXR) and a <strong>normal</strong> map made from the height. Previews, variants, batch rendering and the material builder work exactly as for <code>.sbsar</code> files. Standalone noises get <em>scale</em> and <em>disorder</em> plus their own settings (angle, warp intensity, edge width and so on).</p>
+
+<h3 id="noise-live">Live editing</h3>
+
+<p>Because the noise lab renders inside Godot, Noise Lab materials follow your edits <strong>live</strong>. While you drag a slider, each new noise goes straight into the material in memory, without writing files or importing them, so the mesh updates several times a second (about 0.15 s per update at 512; changes made meanwhile are merged into the next update). When you stop for 1.5 s, the usual preview render writes the maps, imports them and puts the imported textures back, exactly as before. The dock's status line shows each live update and its time.</p>
+
+<p>Live editing follows <em>Auto preview on change</em>: turn that off and Noise Lab materials only render when you press <strong>Preview</strong> or <strong>Render Final</strong>. <code>.sbsar</code> materials don't update live; each change still renders with <code>sbsrender</code>.</p>
 
 <div class="callout warn">
   <p>Like the native baker, the noise lab renders through the editor window: keep the editor visible while a noise renders. The noise lab's code is private; see its README before sharing anything made with it.</p>

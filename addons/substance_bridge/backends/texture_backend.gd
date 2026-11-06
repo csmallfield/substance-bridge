@@ -38,6 +38,18 @@ func runs_on_main_thread() -> bool:
 	return false
 
 
+## True when generate_images() can render the maps into memory fast enough to follow
+## parameter edits live (main-thread coroutine; see the noise lab backend).
+func supports_live() -> bool:
+	return false
+
+
+## Live backends only: {usage: Image, "commands": ..., "errors": ...}. No files are written.
+## live: favour latency over a smooth editor frame rate.
+func generate_images(_request: RenderRequest, _live := false) -> Dictionary:
+	return {"commands": PackedStringArray(), "errors": PackedStringArray(["%s has no live preview" % get_display_name()])}
+
+
 ## Reasons the backend cannot run on this machine; empty when ready.
 func check_available() -> PackedStringArray:
 	return PackedStringArray()

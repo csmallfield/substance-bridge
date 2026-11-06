@@ -383,3 +383,34 @@ and `selftest.gd` (headless editor with `SUBSTANCE_BRIDGE_SELFTEST=<sbsar>`).
   preview and final render reuses them.
 - `sbsrender` warns `Image input "<id>" has not been set` for optional image inputs it
   wasn't given. That's only treated as a failure for ids the plugin passed with `--set-entry`.
+## 8. Native mesh-map baker (verified, phase 7)
+
+AO, curvature, position and world-space normal baked inside Godot 4.7 through SubViewports
+(`addons/substance_bridge/backends/native/native_baker.gd`), no Substance tools needed. Thickness
+still uses `sbsbaker`.
+
+- UV-space raster: a spatial shader writes `POSITION = vec4(UV * 2 - 1, 0.5, 1)`. Viewport
+  textures read back with clip y = -1 on the top row, so V is **not** flipped (the first attempt
+  flipped it, and every map came out upside down).
+- `use_hdr_2d = true` gives a float target without sRGB conversion, so the values stay data.
+- AO: 64 Fibonacci-sphere directions, a 512² orthographic depth map each, then one UV pass that
+  tests every texel against all depth maps facing it (cosine-weighted). The occluder-distance
+  limit is approximated from the depth gap; 0.4 × bbox diagonal matches sbsbaker on the rock
+  (sbsbaker's own default is 0.1, but the depth gap overestimates distance in crevices).
+- Curvature: `0.5 + 0.5 · (dN/dx·dP/dx / |dP/dx|² + same for y) · 0.0028 · bbox diagonal`.
+  The gain was calibrated so the spread matches sbsbaker's.
+- Dilation: one canvas pass fills empty texels with the nearest island texel within 16 px.
+
+Compared with sbsbaker on `rock01` at 2K, island texels only:
+
+| Map | Correlation | Mean (native vs sbsbaker) | Spread | Mean difference |
+|---|---|---|---|---|
+| World normal | 1.000 | 0.493 vs 0.495 | 0.229 vs 0.229 | 0.5/255 |
+| Position | 1.000 | 0.492 vs 0.494 | 0.260 vs 0.260 | 10.8/255 (bbox vs sphere normalisation) |
+| Curvature | 0.898 | 0.504 vs 0.499 | 0.077 vs 0.076 | 5.1/255 |
+| AO | 0.764 | 0.972 vs 0.973 | 0.032 vs 0.032 | 3.7/255 |
+
+All four maps at 2K take about 5 s. The baker needs a drawing window (not headless, not
+minimised): passes wait for `frame_post_draw`, and low-processor mode is switched off while it runs.
+Check: `godot --path . --script res://addons/substance_bridge/tests/native_bake_check.gd`
+(windowed).

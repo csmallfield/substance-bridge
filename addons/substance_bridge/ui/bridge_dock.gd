@@ -506,9 +506,10 @@ func _refresh() -> void:
 		_auto_check.set_pressed_no_signal(current.auto_preview)
 		var mesh_line := ""
 		if not mesh_usages.is_empty():
-			mesh_line = "\nmesh maps (%s) at %s from %s" % [", ".join(mesh_usages),
+			mesh_line = "\nmesh maps (%s) at %s from %s, %s baker" % [", ".join(mesh_usages),
 					current.size_name(current.bake_size),
-					current.baked_mesh if not current.baked_mesh.is_empty() else "(no mesh yet)"]
+					current.baked_mesh if not current.baked_mesh.is_empty() else "(no mesh yet)",
+					"native" if current.baker == GraphSettings.BAKER_NATIVE else "Substance"]
 		if current.is_name_mismatched():
 			mesh_line += "\nNote: renders %s; the name is from the graph it was created with." % current.source.get_file()
 		_current_label.text = "%s (%s, seed %d)\npreview %s, final %s, %d changed parameter(s)%s" % [

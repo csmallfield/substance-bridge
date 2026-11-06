@@ -15,6 +15,7 @@ const RenderResult := preload("res://addons/substance_bridge/backends/render_res
 const MaterialBuilder := preload("res://addons/substance_bridge/material/material_builder.gd")
 const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
 const ObjWriter := preload("res://addons/substance_bridge/core/obj_writer.gd")
+const NativeBaker := preload("res://addons/substance_bridge/backends/native/native_baker.gd")
 
 const SETTINGS_META := "substance_bridge_settings"
 
@@ -41,6 +42,7 @@ func duplicate_settings(gs: GraphSettings, random_seed: int) -> GraphSettings:
 	v.preview_size = gs.preview_size
 	v.final_size = gs.final_size
 	v.bake_size = gs.bake_size
+	v.baker = gs.baker
 	v.auto_preview = gs.auto_preview
 	v.mesh_obj = gs.mesh_obj
 	v.baked_mesh = gs.baked_mesh
@@ -117,6 +119,13 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 	var sbsbaker := String(config["sbsbaker"])
 
 	var started := Time.get_ticks_msec()
+	# Native baker: bake on the main thread first; the worker then only bakes what is left
+	# (thickness) with sbsbaker.
+	if gs.baker == GraphSettings.BAKER_NATIVE and not gs.mesh_obj.is_empty() and not backend.runs_on_main_thread():
+		var native_error: String = await _bake_native(gs, request, String(config["cache_dir"]), force)
+		if not native_error.is_empty():
+			_log("ERROR: " + native_error)
+			return {"error": native_error}
 	var result: RenderResult
 	if backend.runs_on_main_thread():
 		# GPU work inside the engine (noise lab): a coroutine on the main thread. No mesh maps.
@@ -167,6 +176,8 @@ static func _bake_and_render(backend: TextureBackend, request: RenderRequest, sb
 	if desc.is_ok():
 		var wanted := {}  # usage -> image input id
 		for p in desc.image_inputs():
+			if request.image_inputs.has(p["id"]):
+				continue  # already baked (native baker)
 			for u: String in p.get("usages", PackedStringArray()):
 				if u in MeshBaker.BAKERS and not wanted.has(u):
 					wanted[u] = p["id"]
@@ -197,6 +208,33 @@ static func _bake_and_render(backend: TextureBackend, request: RenderRequest, sb
 	return backend.render(request)
 
 
+## Bakes the graph's mesh maps that the native baker supports, on the main thread, and puts
+## them in request.image_inputs. Returns an error message, or "".
+func _bake_native(gs: GraphSettings, request: RenderRequest, cache_dir: String, force: bool) -> String:
+	if not gs.is_described():
+		gs.describe_blocking()
+	var wanted := gs.mesh_inputs()
+	var usages := PackedStringArray()
+	for u: String in wanted:
+		if u in NativeBaker.USAGES:
+			usages.append(u)
+	if usages.is_empty():
+		return ""
+	var mesh_res := gs.mesh_obj.get_basename() + ".res"
+	if not ResourceLoader.exists(mesh_res):
+		return "The native baker needs the mesh saved by a newer version: select the mesh and press \"Bake from Selected Mesh\"."
+	var mesh := ResourceLoader.load(mesh_res) as Mesh
+	var dir := cache_dir.path_join("bakes").path_join("%s_%d_native" % [gs.mesh_obj.get_file().get_basename(), gs.bake_size])
+	var baked: Dictionary = await NativeBaker.bake(mesh, usages, gs.bake_size, dir, force)
+	if not baked["errors"].is_empty():
+		return "; ".join(baked["errors"])
+	for u: String in baked["maps"]:
+		request.image_inputs[wanted[u]] = baked["maps"][u]
+	_log("Native mesh maps %s: %s" % ["baked in %.1f s" % baked["seconds"] if baked["baked"] > 0 else "from cache",
+			", ".join(PackedStringArray(baked["maps"].keys()))])
+	return ""
+
+
 ## Exports a MeshInstance3D's mesh as OBJ into the cache and points the settings at it.
 ## Returns an error message, or "".
 func set_mesh(gs: GraphSettings, mi: MeshInstance3D) -> String:
@@ -224,6 +262,10 @@ func set_mesh(gs: GraphSettings, mi: MeshInstance3D) -> String:
 	var r: Dictionary = await task.finished
 	if r.has("error"):
 		return r["error"]
+	# The native baker draws the Godot mesh itself; keep a copy next to the OBJ.
+	var mesh_res := cache_dir.path_join(String(r["md5"]) + ".res")
+	if not FileAccess.file_exists(mesh_res):
+		ResourceSaver.save(mi.mesh.duplicate(), mesh_res)
 	gs.baked_mesh = "%s (%d vertices)" % [mi.name, vertex_count]
 	gs.mesh_obj = "user://substance_bridge/meshes/%s.obj" % r["md5"]
 	if not gs.resource_path.is_empty():

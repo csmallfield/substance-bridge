@@ -23,7 +23,7 @@ const SIZE_NAMES := {8: "256", 9: "512", 10: "1K", 11: "2K", 12: "4K"}
 ## Our own property names; graph parameters with these ids get a "param_" prefix.
 const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_preview",
 		"material", "values", "output_name", "last_render_key", "backend_id", "preset",
-		"bake_size", "baked_mesh", "mesh_obj",
+		"bake_size", "baked_mesh", "mesh_obj", "baker",
 		"script", "resource_name", "resource_path", "resource_local_to_scene", "resource_scene_unique_id"]
 
 ## The .sbsar this material is generated from. Read-only in the inspector: the folder,
@@ -64,6 +64,13 @@ var source := "":
 @export_enum("1K:10", "2K:11", "4K:12") var bake_size := 11:
 	set(v):
 		bake_size = v
+		_params_changed()
+
+## Which baker makes the mesh maps. Native bakes AO, curvature, position and world normal in
+## Godot (no Substance tools; needs the editor window visible); thickness always uses sbsbaker.
+@export_enum("Substance (sbsbaker)", "Native (Godot)") var baker := 0:
+	set(v):
+		baker = v
 		_params_changed()
 
 ## Mesh the maps are baked from (set with the dock's "Bake from Selected Mesh").
@@ -113,8 +120,24 @@ func is_described() -> bool:
 ## Hash of everything that affects the rendered maps at this size.
 func render_key(size_log2: int) -> String:
 	var mtime := FileAccess.get_modified_time(source) if FileAccess.file_exists(source) else 0
-	var mesh := [mesh_obj, bake_size] if not mesh_usages().is_empty() else []
+	var mesh := [mesh_obj, bake_size, baker] if not mesh_usages().is_empty() else []
 	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2, mesh]).md5_text()
+
+
+const BAKER_SUBSTANCE := 0
+const BAKER_NATIVE := 1
+
+
+## Image input id per mesh-map usage, e.g. {"ambientOcclusion": "ambient_occlusion"}.
+func mesh_inputs() -> Dictionary:
+	var wanted := {}
+	if _description == null:
+		return wanted
+	for p in _description.image_inputs():
+		for u: String in p.get("usages", PackedStringArray()):
+			if u in MeshBaker.BAKERS and not wanted.has(u):
+				wanted[u] = p["id"]
+	return wanted
 
 
 ## Mesh-map usages the graph takes as image inputs and the baker can produce, e.g.

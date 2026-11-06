@@ -182,6 +182,18 @@ func _mesh_adaptive(dock: Node, rock: MeshInstance3D, sbsar: String) -> void:
 	await _wait_idle(dock)
 	_expect(FileAccess.file_exists(bakes.path_join("%s_10" % key).path_join("curvature.png")), "changing the bake size re-bakes at 1K")
 
+	# --- native baker (needs a drawing window)
+	if DisplayServer.get_name() != "headless":
+		var native_dir := bakes.path_join("%s_10_native" % key)
+		var before := _albedo_hash(gs)
+		gs.baker = GraphSettings.BAKER_NATIVE
+		await _wait_idle(dock)
+		_expect(FileAccess.file_exists(native_dir.path_join("ambientOcclusion.png"))
+				and FileAccess.file_exists(native_dir.path_join("curvature.png")), "native baker baked AO + curvature")
+		_expect(_albedo_hash(gs) != before, "render uses the native bakes")
+		gs.baker = GraphSettings.BAKER_SUBSTANCE
+		await _wait_idle(dock)
+
 	# --- batch with forced re-bake
 	var ao_file := bakes.path_join("%s_10" % key).path_join("ambientOcclusion.png")
 	var ao_time := FileAccess.get_modified_time(ao_file)

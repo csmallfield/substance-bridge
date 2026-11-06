@@ -5,8 +5,9 @@ set its parameters in the Inspector, and get a material built and applied withou
 editor. Two texture backends share the same Inspector, previews, variants, batch rendering and
 material builder:
 
-- **Substance**: renders `.sbsar` files with Adobe's command-line tools, and bakes mesh maps
-  (AO, curvature, position, world normal, thickness) from the selected mesh for mesh-adaptive graphs.
+- **Substance**: renders `.sbsar` files with Adobe's command-line tools. For mesh-adaptive graphs
+  it bakes mesh maps from the selected mesh, with `sbsbaker` or with the **native baker** (AO,
+  curvature, position and world normal in Godot itself; choose per material with *Baker*).
 - **Noise Lab**: native Godot rebuilds of Substance noises and Grunge Maps, from
   sd-mm-noise-lab (`D:\01_github\sd-mm-noise-lab`). Don't publish (see that repo's README).
 
@@ -53,6 +54,7 @@ From the project folder (`<godot>` is the 4.7 console executable):
 <godot> --headless --path . --script res://addons/substance_bridge/tests/backend_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/obj_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
+<godot> --path . --script res://addons/substance_bridge/tests/native_bake_check.gd   (windowed: native baker vs sbsbaker)
 ```
 
 The editor self-test (`tests/selftest.gd`) drives the dock end to end. Set

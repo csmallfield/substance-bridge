@@ -1,0 +1,7 @@
+# Normalize line endings for text files
+* text=auto eol=lf
+
+*.fbx binary
+*.res binary
+*.png binary
+*.sbsar binary

@@ -1,0 +1,8 @@
+# Godot import cache and editor state
+.godot/
+
+# Generated textures and materials (regenerable from the .sbsar + parameters)
+/substance_bridge/
+
+# Step 1 validation output: bakes, renders, screenshots (see docs/validated-commands.md)
+/validation/

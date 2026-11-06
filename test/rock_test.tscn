@@ -1,0 +1,32 @@
+[gd_scene format=3 uid="uid://j1qf6wbth4mo"]
+
+[ext_resource type="Material" uid="uid://daog7ltnrx8d6" path="res://substance_bridge/JRO_PaintedConcrete_s42/JRO_PaintedConcrete_s42.tres" id="1_baq7a"]
+[ext_resource type="ArrayMesh" uid="uid://c7tl20s1077v2" path="res://test/rock01_mesh.res" id="2_38xyi"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_xu02d"]
+
+[sub_resource type="Sky" id="Sky_iof4q"]
+sky_material = SubResource("ProceduralSkyMaterial_xu02d")
+
+[sub_resource type="Environment" id="Environment_p4b06"]
+background_mode = 2
+sky = SubResource("Sky_iof4q")
+tonemap_mode = 2
+
+[node name="RockTest" type="Node3D" unique_id=274057149]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=160922409]
+environment = SubResource("Environment_p4b06")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=871957418]
+transform = Transform3D(0.81915206, -0.3686878, 0.43938506, 0, 0.76604444, 0.6427876, -0.57357645, -0.52654076, 0.62750685, 0, 0, 0)
+shadow_enabled = true
+
+[node name="Rock" type="MeshInstance3D" parent="." unique_id=42298216]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.060376324, 0)
+material_override = ExtResource("1_baq7a")
+mesh = ExtResource("2_38xyi")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1793805315]
+transform = Transform3D(0.9438584, -0.12914555, 0.30406058, 0, 0.9204183, 0.390935, -0.33035043, -0.3689873, 0.8687445, 0.09416697, 0.1872473, 0.2687378)
+far = 2.589849

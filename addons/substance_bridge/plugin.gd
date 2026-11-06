@@ -6,8 +6,10 @@ const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const Task := preload("res://addons/substance_bridge/core/task.gd")
 const ToolRunner := preload("res://addons/substance_bridge/core/tool_runner.gd")
 const Dock := preload("res://addons/substance_bridge/ui/bridge_dock.gd")
+const PreviewPanel := preload("res://addons/substance_bridge/ui/preview_panel.gd")
 
 var _dock: Dock
+var _preview: PreviewPanel
 var _check_task: Task
 var _selftest: RefCounted
 
@@ -17,12 +19,16 @@ func _enter_tree() -> void:
 	_dock = Dock.new()
 	_dock.undo_redo = get_undo_redo()
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, _dock)
+	_preview = PreviewPanel.new()
+	_preview.attach(_dock)
+	add_control_to_bottom_panel(_preview, "Substance Preview")
 	_check_tools()
 
 	var tour := OS.get_environment("SUBSTANCE_BRIDGE_TOUR")
 	if not tour.is_empty():
 		# Screenshot tour for the tutorial site; held in a member like the self-test.
 		_selftest = load("res://addons/substance_bridge/tests/tour.gd").new()
+		_selftest.plugin = self
 		_selftest.run.call_deferred(_dock, tour)
 		return
 
@@ -34,6 +40,10 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	if _preview:
+		remove_control_from_bottom_panel(_preview)
+		_preview.queue_free()
+		_preview = null
 	if _dock:
 		remove_control_from_docks(_dock)
 		_dock.queue_free()

@@ -12,6 +12,7 @@ const Task := preload("res://addons/substance_bridge/core/task.gd")
 const GraphDescription := preload("res://addons/substance_bridge/backends/graph_description.gd")
 const Backends := preload("res://addons/substance_bridge/backends/backends.gd")
 const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
+const Routing := preload("res://addons/substance_bridge/material/routing.gd")
 
 ## Emitted when something that affects the rendered maps changes (debounced by the dock).
 signal parameters_changed
@@ -23,7 +24,7 @@ const SIZE_NAMES := {8: "256", 9: "512", 10: "1K", 11: "2K", 12: "4K"}
 ## Our own property names; graph parameters with these ids get a "param_" prefix.
 const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_preview",
 		"material", "values", "output_name", "last_render_key", "backend_id", "preset",
-		"bake_size", "baked_mesh", "mesh_obj", "baker",
+		"bake_size", "baked_mesh", "mesh_obj", "baker", "routes",
 		"script", "resource_name", "resource_path", "resource_local_to_scene", "resource_scene_unique_id"]
 
 ## The .sbsar this material is generated from. Read-only in the inspector: the folder,
@@ -99,6 +100,9 @@ var material: StandardMaterial3D:
 @export_storage var output_name := ""
 ## Parameter id -> value, only for parameters changed from their defaults.
 @export_storage var values := {}
+## Channel routing (material/routing.gd): slot -> {source?, strength?, invert?, range?},
+## only what differs from the defaults. Edited as the inspector's Material Slots group.
+@export_storage var routes := {}
 
 ## Hash of the inputs of the last render this session; identical inputs are not rendered
 ## again. Not saved (it is cache state), so the first preview after a restart renders once.
@@ -121,7 +125,7 @@ func is_described() -> bool:
 func render_key(size_log2: int) -> String:
 	var mtime := FileAccess.get_modified_time(source) if FileAccess.file_exists(source) else 0
 	var mesh := [mesh_obj, bake_size, baker] if not mesh_usages().is_empty() else []
-	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2, mesh]).md5_text()
+	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2, mesh, routes]).md5_text()
 
 
 const BAKER_SUBSTANCE := 0
@@ -236,12 +240,16 @@ func _get_property_list() -> Array[Dictionary]:
 		if not group.is_empty():
 			props.append({"name": group, "type": TYPE_NIL, "usage": PROPERTY_USAGE_GROUP, "hint_string": ""})
 		props.append_array(group_props)
+	props.append_array(_slot_properties())
 	return props
 
 
 func _get(property: StringName) -> Variant:
 	if property == &"preset":
 		return -1
+	var sf := _slot_field(property)
+	if not sf.is_empty():
+		return _get_slot_field(sf[0], sf[1])
 	var p := _param_for_property(property)
 	if p.is_empty():
 		return null
@@ -249,6 +257,10 @@ func _get(property: StringName) -> Variant:
 
 
 func _set(property: StringName, value: Variant) -> bool:
+	var sf := _slot_field(property)
+	if not sf.is_empty():
+		_set_slot_field(sf[0], sf[1], value)
+		return true
 	if property == &"preset":
 		if _description and value >= 0 and value < _description.presets.size():
 			_apply_preset(_description.presets[value])
@@ -264,11 +276,17 @@ func _set(property: StringName, value: Variant) -> bool:
 
 
 func _property_can_revert(property: StringName) -> bool:
+	var sf := _slot_field(property)
+	if not sf.is_empty():
+		return _get_slot_field(sf[0], sf[1]) != _slot_default(sf[0], sf[1])
 	var p := _param_for_property(property)
 	return not p.is_empty() and values.has(p["id"])
 
 
 func _property_get_revert(property: StringName) -> Variant:
+	var sf := _slot_field(property)
+	if not sf.is_empty():
+		return _slot_default(sf[0], sf[1])
 	var p := _param_for_property(property)
 	return parse_value(p.get("default", ""), p) if not p.is_empty() else null
 
@@ -421,3 +439,107 @@ static func _num(v: float) -> String:
 
 static func _enum_text(s: String) -> String:
 	return s.replace(",", " ").replace(":", " ")
+
+# --- material slots (channel routing) -------------------------------------------------------
+
+## Inspector fields per slot; min and max edit the stored "range" (Vector2).
+const SLOT_FIELDS := ["source", "strength", "invert", "min", "max"]
+
+
+## Inspector properties "slot_<slot>_<field>", one subgroup per material slot.
+func _slot_properties() -> Array[Dictionary]:
+	var props: Array[Dictionary] = []
+	props.append({"name": "Material Slots", "type": TYPE_NIL, "usage": PROPERTY_USAGE_GROUP, "hint_string": "slot_"})
+	var choices := ",".join(_source_choices().keys().map(func(k: String) -> String: return _enum_text(k)))
+	for s in Routing.SLOTS:
+		var id: String = s["id"]
+		props.append({"name": s["label"], "type": TYPE_NIL, "usage": PROPERTY_USAGE_SUBGROUP, "hint_string": "slot_%s_" % id})
+		props.append({"name": "slot_%s_source" % id, "type": TYPE_STRING, "hint": PROPERTY_HINT_ENUM,
+				"hint_string": choices, "usage": PROPERTY_USAGE_EDITOR})
+		props.append({"name": "slot_%s_strength" % id, "type": TYPE_FLOAT, "hint": PROPERTY_HINT_RANGE,
+				"hint_string": "0,%s,0.01,or_greater" % _num(s["max"]), "usage": PROPERTY_USAGE_EDITOR})
+		props.append({"name": "slot_%s_invert" % id, "type": TYPE_BOOL, "usage": PROPERTY_USAGE_EDITOR})
+		for f in ["min", "max"]:
+			props.append({"name": "slot_%s_%s" % [id, f], "type": TYPE_FLOAT, "hint": PROPERTY_HINT_RANGE,
+					"hint_string": "0,1,0.01,or_greater,or_less", "usage": PROPERTY_USAGE_EDITOR})
+	return props
+
+
+## Dropdown text -> stored source: "Auto" -> "", "None" -> "-", then each output's id.
+func _source_choices() -> Dictionary:
+	var choices := {"Auto": "", "None": "-"}
+	if _description:
+		for o: Dictionary in _description.outputs:
+			var id := String(o.get("id", ""))
+			var label := String(o.get("label", ""))
+			var text := label if not label.is_empty() else id
+			if choices.has(text):
+				text = "%s (%s)" % [text, id]
+			choices[text] = id
+	return choices
+
+
+## ["roughness", "strength"] for "slot_roughness_strength", else [].
+func _slot_field(property: StringName) -> Array:
+	var name := String(property)
+	if not name.begins_with("slot_"):
+		return []
+	var parts := name.trim_prefix("slot_").split("_")
+	if parts.size() != 2 or not parts[1] in SLOT_FIELDS or Routing.slot_info(parts[0]).is_empty():
+		return []
+	return [parts[0], parts[1]]
+
+
+func _slot_default(slot: String, field: String) -> Variant:
+	match field:
+		"source": return "Auto"
+		"strength": return float(Routing.slot_info(slot)["default"])
+		"invert": return false
+		"min": return 0.0
+		"max": return 1.0
+	return null
+
+
+func _get_slot_field(slot: String, field: String) -> Variant:
+	var r: Dictionary = routes.get(slot, {})
+	if field in ["min", "max"]:
+		var rng: Vector2 = r.get("range", Vector2(0, 1))
+		return rng.x if field == "min" else rng.y
+	if not r.has(field):
+		return _slot_default(slot, field)
+	if field == "source":
+		var choices := _source_choices()
+		for text: String in choices:
+			if choices[text] == r["source"]:
+				return _enum_text(text)
+		return String(r["source"])  # an output the graph no longer has
+	return r[field]
+
+
+func _set_slot_field(slot: String, field: String, value: Variant) -> void:
+	var r: Dictionary = routes.get(slot, {}).duplicate()
+	var stored: Variant = value
+	if field in ["min", "max"]:
+		var rng: Vector2 = r.get("range", Vector2(0, 1))
+		if field == "min":
+			rng.x = float(value)
+		else:
+			rng.y = float(value)
+		field = "range"
+		stored = rng
+	if field == "source":
+		var choices := _source_choices()
+		stored = ""
+		for text: String in choices:
+			if _enum_text(text) == String(value):
+				stored = choices[text]
+	var is_default: bool = stored == "" if field == "source" else (stored == Vector2(0, 1) if field == "range" else stored == _slot_default(slot, field))
+	if is_default:
+		r.erase(field)
+	else:
+		r[field] = stored
+	if r.is_empty():
+		routes.erase(slot)
+	else:
+		routes[slot] = r
+	_params_changed()

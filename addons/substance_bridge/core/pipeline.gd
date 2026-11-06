@@ -38,6 +38,7 @@ func duplicate_settings(gs: GraphSettings, random_seed: int) -> GraphSettings:
 	var v := GraphSettings.new()
 	v.source = gs.source
 	v.values = gs.values.duplicate(true)
+	v.routes = gs.routes.duplicate(true)
 	v.random_seed = random_seed
 	v.preview_size = gs.preview_size
 	v.final_size = gs.final_size
@@ -99,53 +100,14 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 		return {"material": gs.material, "skipped": true, "seconds": 0.0}
 
 	var config := Settings.snapshot()
-	var backend := Backends.create(gs.backend_id, config)
-	var problems := backend.check_available()
-	if not problems.is_empty():
-		return {"error": "; ".join(problems)}
-
-	var request := RenderRequest.new()
-	request.source = gs.source
-	request.description = gs.get_description()  # may be null; described on the worker then
-	request.values = gs.values.duplicate(true)
-	request.random_seed = gs.random_seed
-	request.size_log2 = Vector2i(size_log2, size_log2)
-	request.output_dir = String(config["cache_dir"]).path_join("renders").path_join(gs.output_name)
-
-	var mesh_obj := ProjectSettings.globalize_path(gs.mesh_obj) if not gs.mesh_obj.is_empty() else ""
-	var bake_dir := String(config["cache_dir"]).path_join("bakes").path_join(
-			"%s_%d" % [gs.mesh_obj.get_file().get_basename(), gs.bake_size])
-	var bake_size := gs.bake_size
-	var sbsbaker := String(config["sbsbaker"])
-
 	var started := Time.get_ticks_msec()
-	# Native baker: bake on the main thread first; the worker then only bakes what is left
-	# (thickness) with sbsbaker.
-	if gs.baker == GraphSettings.BAKER_NATIVE and not gs.mesh_obj.is_empty() and not backend.runs_on_main_thread():
-		var native_error: String = await _bake_native(gs, request, String(config["cache_dir"]), force)
-		if not native_error.is_empty():
-			_log("ERROR: " + native_error)
-			return {"error": native_error}
-	var result: RenderResult
-	if backend.runs_on_main_thread():
-		# GPU work inside the engine (noise lab): a coroutine on the main thread. No mesh maps.
-		result = await backend.render(request)
-	else:
-		var task := Task.new()
-		task.start(func() -> RenderResult:
-			return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir, force))
-		result = await task.finished
-	for cmd in result.commands:
-		_log(cmd)
-	for w in result.warnings:
-		_log("warning: " + w)
+	var result: RenderResult = await render_maps(gs, size_log2, config,
+			String(config["cache_dir"]).path_join("renders").path_join(gs.output_name), force)
 	if not result.is_ok():
-		for e in result.errors:
-			_log("ERROR: " + e)
 		return {"error": "; ".join(result.errors)}
 
 	var builder := MaterialBuilder.new()
-	var mat := await builder.build(result, String(config["output_folder"]), gs.output_name)
+	var mat := await builder.build(result, String(config["output_folder"]), gs.output_name, gs.routes)
 	for line in builder.log_lines:
 		_log(line)
 	if mat == null:
@@ -165,6 +127,59 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 			result.duration_ms / 1000.0, seconds])
 	return {"material": mat, "skipped": false, "seconds": seconds}
 
+
+## Renders gs's maps into output_dir (baking mesh maps first when the graph takes them) and
+## returns the RenderResult; no material is built. config: Settings.snapshot(), possibly
+## changed (the live preview picks a faster engine). quiet: log errors only.
+func render_maps(gs: GraphSettings, size_log2: int, config: Dictionary, output_dir: String,
+		force: bool = false, quiet: bool = false) -> RenderResult:
+	var backend := Backends.create(gs.backend_id, config)
+	var problems := backend.check_available()
+	if not problems.is_empty():
+		var unavailable := RenderResult.new()
+		unavailable.errors.append_array(problems)
+		return unavailable
+
+	var request := RenderRequest.new()
+	request.source = gs.source
+	request.description = gs.get_description()  # may be null; described on the worker then
+	request.values = gs.values.duplicate(true)
+	request.random_seed = gs.random_seed
+	request.size_log2 = Vector2i(size_log2, size_log2)
+	request.output_dir = output_dir
+
+	var mesh_obj := ProjectSettings.globalize_path(gs.mesh_obj) if not gs.mesh_obj.is_empty() else ""
+	var bake_dir := String(config["cache_dir"]).path_join("bakes").path_join(
+			"%s_%d" % [gs.mesh_obj.get_file().get_basename(), gs.bake_size])
+	var bake_size := gs.bake_size
+	var sbsbaker := String(config["sbsbaker"])
+
+	# Native baker: bake on the main thread first; the worker then only bakes what is left
+	# (thickness) with sbsbaker.
+	if gs.baker == GraphSettings.BAKER_NATIVE and not gs.mesh_obj.is_empty() and not backend.runs_on_main_thread():
+		var native_error: String = await _bake_native(gs, request, String(config["cache_dir"]), force, quiet)
+		if not native_error.is_empty():
+			_log("ERROR: " + native_error)
+			var failed := RenderResult.new()
+			failed.errors.append(native_error)
+			return failed
+	var result: RenderResult
+	if backend.runs_on_main_thread():
+		# GPU work inside the engine (noise lab): a coroutine on the main thread. No mesh maps.
+		result = await backend.render(request)
+	else:
+		var task := Task.new()
+		task.start(func() -> RenderResult:
+			return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir, force))
+		result = await task.finished
+	if not quiet:
+		for cmd in result.commands:
+			_log(cmd)
+		for w in result.warnings:
+			_log("warning: " + w)
+	for e in result.errors:
+		_log("ERROR: " + e)
+	return result
 
 ## Worker thread: bakes the mesh maps the graph takes (cached), wires them to its image
 ## inputs by usage, then renders.
@@ -210,7 +225,7 @@ static func _bake_and_render(backend: TextureBackend, request: RenderRequest, sb
 
 ## Bakes the graph's mesh maps that the native baker supports, on the main thread, and puts
 ## them in request.image_inputs. Returns an error message, or "".
-func _bake_native(gs: GraphSettings, request: RenderRequest, cache_dir: String, force: bool) -> String:
+func _bake_native(gs: GraphSettings, request: RenderRequest, cache_dir: String, force: bool, quiet := false) -> String:
 	if not gs.is_described():
 		gs.describe_blocking()
 	var wanted := gs.mesh_inputs()
@@ -230,7 +245,8 @@ func _bake_native(gs: GraphSettings, request: RenderRequest, cache_dir: String, 
 		return "; ".join(baked["errors"])
 	for u: String in baked["maps"]:
 		request.image_inputs[wanted[u]] = baked["maps"][u]
-	_log("Native mesh maps %s: %s" % ["baked in %.1f s" % baked["seconds"] if baked["baked"] > 0 else "from cache",
+	if not quiet or baked["baked"] > 0:
+		_log("Native mesh maps %s: %s" % ["baked in %.1f s" % baked["seconds"] if baked["baked"] > 0 else "from cache",
 			", ".join(PackedStringArray(baked["maps"].keys()))])
 	return ""
 

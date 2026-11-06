@@ -20,11 +20,16 @@ const LivePreview := preload("res://addons/substance_bridge/core/live_preview.gd
 
 const LAST_SBSAR_META := "substance_bridge_last_sbsar"
 const PREVIEW_DELAY_SEC := 0.35
-## Live sources (noise lab) update the material in memory on every change; the file render
-## and import that make it permanent wait for a longer pause.
+## With auto preview, every change first updates the material live in memory (LivePreview);
+## the file render and import that make it permanent wait for a longer pause.
 const LIVE_COMMIT_DELAY_SEC := 1.5
 
 enum Job { NONE, PREVIEW, FINAL }
+
+## The current material changed (null when there is none).
+signal current_changed(gs: GraphSettings)
+## A preview or final render of gs finished and its imported maps are on the material.
+signal rendered(gs: GraphSettings)
 
 ## Batch sizes: label, size_log2 (or a mode: -1 = each material's final size, -2 = its preview size).
 const SIZE_FINAL := -1
@@ -70,6 +75,7 @@ func _init() -> void:
 	name = "Substance Bridge"
 	custom_minimum_size = Vector2(240, 0)
 	_pipeline.log_callback = log_line
+	_live.pipeline = _pipeline
 	_live.updated.connect(_on_live_updated)
 
 	add_child(_heading("New material"))
@@ -198,7 +204,11 @@ func _init() -> void:
 	_debounce = Timer.new()
 	_debounce.one_shot = true
 	_debounce.wait_time = PREVIEW_DELAY_SEC
-	_debounce.timeout.connect(func() -> void: _queue(Job.PREVIEW))
+	_debounce.timeout.connect(func() -> void:
+		if _live.is_running():
+			_debounce.start(0.25)  # commit after the live render, not alongside it
+		else:
+			_queue(Job.PREVIEW))
 	add_child(_debounce)
 	_refresh()
 
@@ -261,6 +271,7 @@ func set_current(gs: GraphSettings) -> void:
 		current.parameters_changed.connect(_on_parameters_changed)
 		current.description_loaded.connect(_refresh)
 	_refresh()
+	current_changed.emit(current)
 
 
 # --- create ---------------------------------------------------------------------------------
@@ -443,8 +454,7 @@ func _on_live_updated(gs: GraphSettings, msec: int, error: String) -> void:
 	if not error.is_empty():
 		set_status("Live preview failed: %s" % error)
 	elif not _busy:
-		set_status("Live %s at %s (%d ms); saving the maps after a pause." % [gs.output_name,
-				gs.size_name(gs.preview_size), msec])
+		set_status("Live %s (%d ms); saving the maps after a pause." % [gs.output_name, msec])
 
 
 func _queue(job: Job) -> void:
@@ -472,6 +482,7 @@ func _run(job: Job) -> void:
 	else:
 		set_status("%s at %s (%.1f s)." % ["Final" if job == Job.FINAL else "Preview",
 				gs.size_name(size), out["seconds"]])
+		rendered.emit(gs)
 	_refresh()
 	if _pending != Job.NONE:
 		var next := _pending

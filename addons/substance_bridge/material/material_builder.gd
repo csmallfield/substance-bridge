@@ -15,6 +15,7 @@ extends RefCounted
 ## Must run on the main thread (it uses EditorInterface); build() awaits the import.
 
 const RenderResult := preload("res://addons/substance_bridge/backends/render_result.gd")
+const Routing := preload("res://addons/substance_bridge/material/routing.gd")
 
 ## Usages wired into material slots, in the order they are applied.
 const WIRED_USAGES := ["baseColor", "diffuse", "normal", "roughness", "metallic",
@@ -26,31 +27,55 @@ var log_lines := PackedStringArray()
 
 
 ## Returns the saved material, or null on failure (see log_lines).
-func build(result: RenderResult, output_folder: String, name: String) -> StandardMaterial3D:
+## routes: GraphSettings.routes (see routing.gd); empty = every output by its usage.
+func build(result: RenderResult, output_folder: String, name: String, routes: Dictionary = {}) -> StandardMaterial3D:
 	var dir := output_folder.path_join(name)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+
+	var outputs: Array = result.outputs.duplicate()
+	if outputs.is_empty():  # backends that only fill maps
+		for usage: String in result.maps:
+			outputs.append({"id": usage, "label": usage, "usages": [usage], "path": result.maps[usage]})
+	# Outputs that share a usage: the one in maps is the backend's pick, so it goes first.
+	outputs.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
+		return _is_mapped(result, x) and not _is_mapped(result, y))
+	var plan := Routing.plan(routes, outputs)
+	for o: Dictionary in result.outputs:
+		for u in o.get("usages", []):
+			if not u in WIRED_USAGES and not u in ["diffuse"]:
+				log_lines.append("Not wired: %s" % u)
 
 	var fs := EditorInterface.get_resource_filesystem()
 	var tex_paths := {}
 	var known := PackedStringArray()  # already imported once: needs an explicit reimport
-	for usage: String in result.maps:
-		if not usage in WIRED_USAGES:
-			log_lines.append("Not wired: %s" % usage)
+	for slot: String in plan:
+		var entry: Dictionary = plan[slot]
+		var src := String(entry["output"].get("path", ""))
+		if src.is_empty():
 			continue
-		if usage == "diffuse" and result.maps.has("baseColor"):
-			continue
-		var src: String = result.maps[usage]
-		var dst := dir.path_join("%s_%s.%s" % [name, usage, src.get_extension().to_lower()])
-		# Ask the editor, not ResourceLoader: once a .import file exists, ResourceLoader.exists()
-		# is true even before anything has been imported.
+		var is_float := src.get_extension().to_lower() == "exr"
+		var dst := dir.path_join("%s_%s.%s" % [name, slot, src.get_extension().to_lower()])
+		var image: Image = null
+		if entry["bake"] or (entry["explicit"] and Routing.slot_info(slot)["scalar"]):
+			image = Image.load_from_file(src)
+			if image == null or image.is_empty():
+				log_lines.append("Could not read %s" % src)
+				continue
+			image = Routing.transform(image, entry, slot)
 		if not fs.get_file_type(dst).is_empty():
 			known.append(dst)
-		var err := DirAccess.copy_absolute(src, ProjectSettings.globalize_path(dst))
+		var err: Error
+		if image:
+			err = image.save_exr(ProjectSettings.globalize_path(dst), image.get_format() in [Image.FORMAT_RF, Image.FORMAT_RH]) if is_float \
+					else image.save_png(ProjectSettings.globalize_path(dst))
+		else:
+			err = DirAccess.copy_absolute(src, ProjectSettings.globalize_path(dst))
 		if err != OK:
-			log_lines.append("Could not copy %s: %s" % [src, error_string(err)])
+			log_lines.append("Could not write %s: %s" % [dst, error_string(err)])
 			continue
-		_write_import_settings(dst, usage == "normal", result.normal_convention == "directx")
-		tex_paths[usage] = dst
+		var from_normal := "normal" in Array(entry["output"].get("usages", []))
+		_write_import_settings(dst, slot == "normal", slot == "normal" and from_normal and result.normal_convention == "directx")
+		tex_paths[slot] = dst
 	if tex_paths.is_empty():
 		log_lines.append("No usable maps to build a material from")
 		return null
@@ -65,13 +90,19 @@ func build(result: RenderResult, output_folder: String, name: String) -> Standar
 	if mat == null:
 		mat = StandardMaterial3D.new()
 	for usage in WIRED_USAGES:
+		if String(routes.get(usage, {}).get("source", "")) == "-":
+			Routing.clear_slot(mat, usage)
+			continue
 		if not tex_paths.has(usage):
+			if Routing.is_generated(Routing.slot_texture(mat, usage), usage, dir, name):
+				Routing.clear_slot(mat, usage)  # was routed here before; nothing feeds it now
 			continue
 		var tex := ResourceLoader.load(tex_paths[usage], "Texture2D") as Texture2D
 		if tex == null:
 			log_lines.append("Could not load imported texture %s" % tex_paths[usage])
 			continue
 		_assign(mat, usage, tex)
+		Routing.apply_settings(mat, usage, routes, plan[usage])
 
 	var err := ResourceSaver.save(mat, mat_path)
 	if err != OK:
@@ -84,6 +115,12 @@ func build(result: RenderResult, output_folder: String, name: String) -> Standar
 			", green flipped on import" if result.normal_convention == "directx" else ""])
 	return mat
 
+
+static func _is_mapped(result: RenderResult, o: Dictionary) -> bool:
+	for u in o.get("usages", []):
+		if result.maps.get(u, "") == o.get("path", ""):
+			return true
+	return false
 
 static func _assign(mat: StandardMaterial3D, usage: String, tex: Texture2D) -> void:
 	match usage:

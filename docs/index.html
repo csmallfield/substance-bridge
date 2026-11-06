@@ -21,13 +21,15 @@
     <li class="sub"><a href="#visibility">Visibility rules</a></li>
     <li class="sub"><a href="#presets">Presets and revert</a></li>
     <li><a href="#preview">Previews and final renders</a></li>
+    <li class="sub"><a href="#live">Live editing</a></li>
+    <li class="sub"><a href="#preview-panel">2D preview panel</a></li>
+    <li><a href="#slots">Material slots</a></li>
     <li><a href="#materials">How materials are built</a></li>
     <li><a href="#variants">Seed variants</a></li>
     <li><a href="#batch">Batch rendering</a></li>
     <li><a href="#mesh-maps">Mesh-adaptive graphs</a></li>
     <li><a href="#native-baker">Native baker</a></li>
     <li><a href="#noise-lab">Noise Lab</a></li>
-    <li class="sub"><a href="#noise-live">Live editing</a></li>
     <li><a href="#files">Where files go</a></li>
     <li><a href="#settings">Settings reference</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -203,7 +205,7 @@
 <div class="side">
   <div>
     <ul>
-      <li><strong>Auto preview on change</strong> (on by default) re-renders at the preview size 0.35 s after your last change. Several quick changes give one render. Noise Lab materials go further and update live while you drag (see <a href="#noise-live">Live editing</a>).</li>
+      <li><strong>Auto preview on change</strong> (on by default) updates the material <a href="#live">live</a> while you edit, then renders and imports the maps at the preview size 1.5 s after your last change.</li>
       <li><strong>Preview</strong> renders now at the preview size (256, 512, 1K or 2K; 512 by default).</li>
       <li><strong>Render Final</strong> renders at the final size (512, 1K, 2K or 4K; 2K by default). The button shows the size.</li>
       <li>If nothing that affects the maps has changed since the last render at that size, the render is skipped and the dock says it's up to date.</li>
@@ -217,10 +219,75 @@
   </figure>
 </div>
 
+<h3 id="live">Live editing</h3>
+
+<p>With <em>Auto preview on change</em> on, every change first updates the material <strong>live</strong>: fresh maps go straight into the material in memory, with no files written and no import, so the mesh follows a slider drag. Changes made while a live update renders are merged into the next one, so a fast drag never queues up stale renders.</p>
+
+<table>
+  <thead><tr><th>Source</th><th>Live update</th><th>Typical time (RTX 3080)</th></tr></thead>
+  <tbody>
+    <tr><td>Noise Lab</td><td>Rendered on the GPU at the preview size</td><td>about 0.15 s at 512</td></tr>
+    <tr><td><code>.sbsar</code></td><td><code>sbsrender</code> at 256 with its CPU engine (it starts fastest at small sizes), PNGs loaded directly</td><td>about 0.7 s</td></tr>
+  </tbody>
+</table>
+
+<p>When you stop for 1.5 s, the normal preview render writes the maps at the preview size, imports them and puts the imported textures back on the material, so what's saved is exactly what a plain render gives. The dock's status line shows each live update and how long it took. Mesh-adaptive graphs use their cached mesh maps for live updates.</p>
+
+<h3 id="preview-panel">The 2D preview panel</h3>
+
+<p>The <strong>Substance Preview</strong> tab in the editor's bottom panel shows the current material's maps in 2D. During live editing it shows <em>every</em> output of the graph, including ones that aren't wired into a material slot (tarmac's Specular and Glossiness, for example), updated with each live render. Otherwise it shows the textures on the material.</p>
+
+<figure>
+  <img src="images/22_panel_live.webp" width="1051" height="398" alt="Substance Preview panel: a large Diffuse view and thumbnails of tarmac's eight outputs">
+  <figcaption>Tarmac's eight outputs during live editing; the title shows the last live update's time.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Click a thumbnail</strong> to show it large.</li>
+  <li><strong>Tile</strong> (1×, 2×, 3×) repeats the map so you can check its seams.</li>
+  <li><strong>Channel</strong> shows RGB, or R, G, B or A alone as greyscale. One-channel maps (height, masks) always show as grey.</li>
+  <li><strong>Mouse wheel</strong> zooms toward the cursor; drag to pan; double-click to reset.</li>
+</ul>
+
+<figure>
+  <img src="images/23_panel_tiled.webp" width="1051" height="398" alt="The panel showing Base Color tiled three times">
+  <figcaption>Base Color tiled 3× to check the seams.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="slots">Material slots (channel routing)</h2>
+
+<p>By default each output goes to the material slot its usage names. The Inspector's <strong>Material Slots</strong> group, below the graph's own parameters, lets you change that per slot (Albedo, Normal, Roughness, Metallic, Ambient Occlusion, Emission, Height):</p>
+
+<div class="side">
+  <div>
+    <table>
+      <thead><tr><th>Field</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>Source</td><td><em>Auto</em> (by usage), <em>None</em> (slot off), or any output of the graph. One output can feed several slots.</td></tr>
+        <tr><td>Strength</td><td>The slot's own amount: roughness and metallic values, normal scale, AO light affect, emission energy, height (parallax) scale. For Albedo it fades the map toward white.</td></tr>
+        <tr><td>Invert</td><td>Flips the map (1 − value).</td></tr>
+        <tr><td>Min / Max</td><td>Remaps the map's 0–1 range, e.g. 0.35–1 keeps a roughness map from going fully glossy.</td></tr>
+      </tbody>
+    </table>
+    <p>Invert, Min/Max and Albedo strength are baked into that slot's texture (<code>&lt;name&gt;_&lt;slot&gt;.png</code> or <code>.exr</code>; float maps stay float). A colour output sent to a greyscale slot (roughness, metallic, AO, height) is converted to luminance. Choosing a source for Height also turns on parallax.</p>
+    <p>Routing applies to live updates too, so you see it on the mesh as you change it. Reverting every field of a slot returns it to Auto; slots that nothing feeds any more are cleared.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/24_inspector_slots.webp" width="431" height="807" alt="Inspector Material Slots group: Albedo and Normal on Auto, Roughness sourced from Height, inverted, Min 0.35">
+    <figcaption>Roughness driven by the noise's height, inverted, with Min 0.35.</figcaption>
+  </figure>
+</div>
+
+<figure>
+  <img src="images/25_view_routed.webp" width="1063" height="902" alt="Rock with Grunge Map 014 driving albedo, roughness and ambient occlusion">
+  <figcaption>One Grunge Map driving albedo, normal, roughness (inverted, 0.35–1) and AO (strength 0.6).</figcaption>
+</figure>
+
 <!-- ============================================================ -->
 <h2 id="materials">How materials are built</h2>
 
-<p>Outputs are matched to material slots by their declared usage, never by file name:</p>
+<p>By default, outputs are matched to material slots by their declared usage, never by file name (to send them elsewhere, see <a href="#slots">Material slots</a>):</p>
 
 <table>
   <thead><tr><th>Usage</th><th>StandardMaterial3D slot</th><th>Notes</th></tr></thead>
@@ -380,11 +447,7 @@
 
 <p>Each noise renders three maps: a greyscale <strong>albedo</strong>, a full-precision <strong>height</strong> (EXR) and a <strong>normal</strong> map made from the height. Previews, variants, batch rendering and the material builder work exactly as for <code>.sbsar</code> files. Standalone noises get <em>scale</em> and <em>disorder</em> plus their own settings (angle, warp intensity, edge width and so on).</p>
 
-<h3 id="noise-live">Live editing</h3>
-
-<p>Because the noise lab renders inside Godot, Noise Lab materials follow your edits <strong>live</strong>. While you drag a slider, each new noise goes straight into the material in memory, without writing files or importing them, so the mesh updates several times a second (about 0.15 s per update at 512; changes made meanwhile are merged into the next update). When you stop for 1.5 s, the usual preview render writes the maps, imports them and puts the imported textures back, exactly as before. The dock's status line shows each live update and its time.</p>
-
-<p>Live editing follows <em>Auto preview on change</em>: turn that off and Noise Lab materials only render when you press <strong>Preview</strong> or <strong>Render Final</strong>. <code>.sbsar</code> materials don't update live; each change still renders with <code>sbsrender</code>.</p>
+<p>Because the noise lab renders inside Godot, its <a href="#live">live updates</a> are the fastest: about 0.15 s at 512, several per second while you drag. Its height map is a good source for other slots: see <a href="#slots">Material slots</a>.</p>
 
 <div class="callout warn">
   <p>Like the native baker, the noise lab renders through the editor window: keep the editor visible while a noise renders. The noise lab's code is private; see its README before sharing anything made with it.</p>
@@ -440,6 +503,7 @@ user://substance_bridge/           per-machine cache
     <tr><td>Auto Preview</td><td>On (default) or off</td></tr>
     <tr><td>Bake Size</td><td>1K, 2K (default), 4K (mesh-adaptive graphs)</td></tr>
     <tr><td>Baker</td><td>Substance (default) or Native</td></tr>
+    <tr><td>Material Slots</td><td>Per slot: Source (Auto, None or an output), Strength, Invert, Min, Max (see <a href="#slots">Material slots</a>)</td></tr>
   </tbody>
 </table>
 
@@ -470,6 +534,7 @@ user://substance_bridge/           per-machine cache
 godot --headless --path . --script res://addons/substance_bridge/tests/backend_check.gd
 godot --headless --path . --script res://addons/substance_bridge/tests/obj_check.gd
 godot --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
+godot --headless --path . --script res://addons/substance_bridge/tests/routing_check.gd
 godot --path . --script res://addons/substance_bridge/tests/native_bake_check.gd</code></pre>
 <p>The editor self-test drives the dock end to end: create, Inspector, previews, variants, batch, mesh-adaptive baking with both bakers, and the Noise Lab. Set <code>SUBSTANCE_BRIDGE_SELFTEST</code> to <code>tarmac.sbsar</code>, optionally <code>SUBSTANCE_BRIDGE_SELFTEST_MESH</code> and <code>SUBSTANCE_BRIDGE_SELFTEST_NOISE</code>, then run the editor with <code>--log-file</code>. Run it windowed on a copy of the project. The screenshots on this page come from <code>tests/tour.gd</code>, run the same way with <code>SUBSTANCE_BRIDGE_TOUR</code> set to an output folder.</p>
 

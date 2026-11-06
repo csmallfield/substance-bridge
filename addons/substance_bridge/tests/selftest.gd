@@ -83,7 +83,24 @@ func run(dock: Node, sbsar: String) -> void:
 	gs.set("asphalt_color", Color(0.45, 0.1, 0.08))
 	await _tree.process_frame
 	_expect(dock.is_busy(), "change schedules a preview")
+	# Live first: a fast 256 render goes into the material in memory, and into the 2D panel.
+	var live_started := Time.get_ticks_msec()
+	while dock._live.is_running():
+		await _tree.process_frame
+	var live_ms := Time.get_ticks_msec() - live_started
+	var m0 := gs.material
+	_expect(m0.albedo_texture is ImageTexture and m0.albedo_texture.get_width() == 256
+			and m0.normal_texture is ImageTexture and not dock._debounce.is_stopped(),
+			"sbsar live update at 256 before the file render (%d ms)" % live_ms)
+	var panels := EditorInterface.get_base_control().find_children("Substance Preview", "VBoxContainer", true, false)
+	var panel: Node = panels[0] if not panels.is_empty() else null
+	_expect(panel != null and panel._items.size() >= 3 and panel._items[0]["texture"] is ImageTexture,
+			"2D preview panel shows the live outputs (%s)" % (", ".join(panel._items.map(func(i): return i["label"])) if panel else "no panel"))
 	await _wait_idle(dock)
+	_expect(gs.material.albedo_texture is CompressedTexture2D and gs.material.albedo_texture.get_width() == 512,
+			"imported 512 preview replaces the live maps")
+	_expect(panel != null and panel._items.size() >= 3 and panel._items[0]["texture"] is CompressedTexture2D,
+			"2D panel shows the material's imported textures after the render")
 	_expect(gs.last_render_key != key_before and _albedo_hash(gs) != before, "preview re-rendered with new values")
 	_expect(gs.property_can_revert("tarmac_damage") and is_equal_approx(gs.property_get_revert("tarmac_damage"), 0.6), "revert to default available")
 
@@ -254,6 +271,47 @@ func _noise_lab(dock: Node, rock: MeshInstance3D, noise: String) -> void:
 	await _wait_idle(dock)
 	_expect(m.albedo_texture is CompressedTexture2D and m.albedo_texture.resource_path.ends_with("_baseColor.png"),
 			"after the pause the imported maps replace the live textures")
+
+	# Channel routing: height into roughness (inverted, 0.2..0.9, strength 0.8) and AO; normal off.
+	var props_now := gs.get_property_list().map(func(p: Dictionary) -> String: return p["name"])
+	_expect("slot_roughness_source" in props_now and "slot_height_min" in props_now and "slot_height_max" in props_now, "Material Slots properties listed")
+	gs.set("slot_roughness_source", "Height")
+	gs.set("slot_roughness_invert", true)
+	gs.set("slot_roughness_min", 0.2)
+	gs.set("slot_roughness_max", 0.9)
+	gs.set("slot_roughness_strength", 0.8)
+	gs.set("slot_ambientOcclusion_source", "Height")
+	gs.set("slot_ambientOcclusion_strength", 0.5)
+	gs.set("slot_normal_source", "None")
+	_expect(gs.routes.get("roughness", {}).get("source") == "height" and gs.get("slot_roughness_source") == "Height"
+			and gs.routes.get("normal", {}).get("source") == "-", "routes stored by output id (%s)" % str(gs.routes))
+	while dock._live.is_running() or dock._live._next != null:
+		await _tree.process_frame
+	await _tree.process_frame
+	_expect(m.roughness_texture is ImageTexture and is_equal_approx(m.roughness, 0.8) and m.ao_texture is ImageTexture
+			and is_equal_approx(m.ao_light_affect, 0.5) and not m.normal_enabled, "live preview applies the routes")
+	await _wait_idle(dock)
+	var rough_path := m.roughness_texture.resource_path if m.roughness_texture else ""
+	_expect(m.roughness_texture is CompressedTexture2D and rough_path.ends_with("_roughness.exr") and m.ao_texture is CompressedTexture2D
+			and is_equal_approx(m.roughness, 0.8) and is_equal_approx(m.ao_light_affect, 0.5) and not m.normal_enabled and m.normal_texture == null,
+			"routed material built: %s" % rough_path)
+	var height_img := Image.load_from_file(ProjectSettings.globalize_path(m.heightmap_texture.resource_path))
+	var rough_img := Image.load_from_file(ProjectSettings.globalize_path(rough_path))
+	var worst := 0.0
+	for i in 16:
+		var xy := Vector2i((i * 97) % height_img.get_width(), (i * 61) % height_img.get_height())
+		var want := 0.9 - 0.7 * clampf(height_img.get_pixelv(xy).r, 0, 1)
+		worst = maxf(worst, absf(rough_img.get_pixelv(xy).r - want))
+	_expect(worst < 0.01, "roughness = 0.9 - 0.7 * height (worst error %.4f)" % worst)
+	for slot in ["roughness", "ambientOcclusion", "normal"]:
+		for field in ["source", "invert", "min", "max", "strength"]:
+			if gs.property_can_revert("slot_%s_%s" % [slot, field]):
+				gs.set("slot_%s_%s" % [slot, field], gs.property_get_revert("slot_%s_%s" % [slot, field]))
+	_expect(gs.routes.is_empty(), "reverting every slot field clears the routes (%s)" % str(gs.routes))
+	await _wait_idle(dock)
+	_expect(m.normal_enabled and m.normal_texture is CompressedTexture2D, "Auto routing restores the normal map")
+	_expect(m.roughness_texture == null and m.ao_texture == null and is_equal_approx(m.roughness, 1.0) and is_zero_approx(m.ao_light_affect),
+			"slots nothing feeds any more are cleared")
 
 	var variants: Array = await dock.make_variants(1, [] as Array[MeshInstance3D])
 	_expect(variants.size() == 1 and _albedo_hash(variants[0]) != _albedo_hash(gs), "noise seed variant renders differently")

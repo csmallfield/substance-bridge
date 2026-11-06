@@ -16,6 +16,7 @@ const SCENE := "res://test/rock_test.tscn"
 const ROCK_SCALE := 14.0
 const VARIANT_SCALE := 7.0
 
+var plugin: EditorPlugin
 var _out := ""
 var _tree: SceneTree
 var _dock: Node
@@ -36,6 +37,7 @@ func run(dock: Node, out_dir: String) -> void:
 	while fs.is_scanning():
 		await _tree.process_frame
 
+	plugin.hide_bottom_panel()
 	EditorInterface.open_scene_from_path(SCENE)
 	await _settle(1.0)
 	EditorInterface.set_main_screen_editor("3D")
@@ -75,6 +77,34 @@ func run(dock: Node, out_dir: String) -> void:
 	EditorInterface.edit_resource(gs)
 	await _settle(1.0)
 	await _view_shot("07_view_edited")
+
+	# --- 2D preview panel: live outputs (before the commit render), then tiling and a channel
+	var panel: Control = plugin._preview
+	plugin.make_bottom_panel_item_visible(panel)
+	await _settle(0.5)
+	panel.custom_minimum_size.y = 430  # the editor then makes room for it
+	await _settle(0.5)
+	gs.set("tarmac_damage", 0.7)
+	await _tree.process_frame
+	while _dock._live.is_running():
+		await _tree.process_frame
+	await _settle(0.4)
+	_shot("22_panel_live", panel)
+	for i in panel._items.size():
+		if panel._items[i]["label"] == "Base Color":
+			panel._selected = i
+			panel._selected_label = "Base Color"
+	panel._tile.select(2)
+	panel._update_view()
+	await _settle(0.4)
+	_shot("23_panel_tiled", panel)
+	panel._tile.select(0)
+	panel._selected_label = ""
+	panel._update_view()
+	await _idle()
+	panel.custom_minimum_size.y = 260
+	plugin.hide_bottom_panel()  # later view shots keep their full height
+	await _settle(0.3)
 	await _inspector_scrolled("08_inspector_edited", gs)
 
 	# --- visibility rules
@@ -177,6 +207,20 @@ func run(dock: Node, out_dir: String) -> void:
 		EditorInterface.edit_resource(noise)
 		await _settle(1.0)
 		await _inspector_scrolled("20_inspector_noise", noise)
+	# --- channel routing: the grunge also drives roughness (inverted, 0.35..1) and AO
+	if noise:
+		noise.set("slot_roughness_source", "Height")
+		noise.set("slot_roughness_invert", true)
+		noise.set("slot_roughness_min", 0.35)
+		noise.set("slot_ambientOcclusion_source", "Height")
+		noise.set("slot_ambientOcclusion_strength", 0.6)
+		await _idle()
+		await _settle(1.0)
+		await _view_shot("25_view_routed")
+		_focus_tab(EditorInterface.get_inspector())
+		EditorInterface.edit_resource(noise)
+		await _settle(1.0)
+		await _slots_shot("24_inspector_slots")
 	await _dock.create_material("noiselab://moisture_noise", [rock] as Array[MeshInstance3D])
 	await _settle(1.5)
 	await _view_shot("21_view_moisture")
@@ -221,6 +265,31 @@ func _inspector_scrolled(name: String, res: Resource) -> void:
 	await _settle(0.6)
 	inspector.scroll_vertical = 540
 	await _settle(0.4)
+	_shot(name, inspector)
+	inspector.scroll_vertical = 0
+
+
+## Moves the bottom panel's divider so panel is about height px tall.
+func _set_panel_height(panel: Control, height: int) -> void:
+	var n: Node = panel
+	while n and not (n is SplitContainer and (n as SplitContainer).vertical):
+		n = n.get_parent()
+	if n:
+		(n as SplitContainer).split_offset -= int(height - panel.size.y)
+
+
+## An Inspector shot scrolled to the Material Slots group, with its sections unfolded.
+func _slots_shot(name: String) -> void:
+	var inspector := EditorInterface.get_inspector()
+	for section in inspector.find_children("*", "EditorInspectorSection", true, false):
+		section.call("unfold")
+	await _settle(0.6)
+	for prop in inspector.find_children("*", "EditorProperty", true, false):
+		if (prop as EditorProperty).get_edited_property() == &"slot_baseColor_source":
+			var y := (prop as Control).global_position.y - inspector.global_position.y + inspector.scroll_vertical
+			inspector.scroll_vertical = int(y - 60)
+			break
+	await _settle(0.5)
 	_shot(name, inspector)
 	inspector.scroll_vertical = 0
 

@@ -39,9 +39,12 @@ In the Substance Bridge dock (top-right, beside the Inspector):
 
 - **Create and Apply to Selected**: choose an `.sbsar` or a noise, select MeshInstance3D nodes, click.
   Mesh-adaptive graphs bake their mesh maps from the first selected mesh.
-- Edit the parameters in the Inspector; a preview re-renders shortly after each change. Noise Lab
-  materials also update **live** while you drag: the maps go straight into the material in memory
-  (about 0.15 s per update at 512), and the files are written and imported after a 1.5 s pause.
+- Edit the parameters in the Inspector. Each change updates the material **live** in memory
+  (Noise Lab: about 0.15 s at 512; `.sbsar`: `sbsrender` at 256 with the CPU engine, about
+  0.7 s), then the maps are rendered at the preview size and imported after a 1.5 s pause.
+- The **Substance Preview** bottom panel shows every output in 2D (tile, channel, zoom).
+- The Inspector's **Material Slots** group routes outputs to material slots: source (Auto, None or
+  any output), strength, invert and a min/max remap, baked per slot.
 - **Render Final**, **Make Seed Variants** (one per selected mesh), **Render All** (every material,
   any size, optional re-bake).
 
@@ -58,6 +61,7 @@ From the project folder (`<godot>` is the 4.7 console executable):
 <godot> --headless --path . --script res://addons/substance_bridge/tests/backend_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/obj_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
+<godot> --headless --path . --script res://addons/substance_bridge/tests/routing_check.gd
 <godot> --path . --script res://addons/substance_bridge/tests/native_bake_check.gd   (windowed: native baker vs sbsbaker)
 ```
 

@@ -7,7 +7,11 @@ extends RefCounted
 ##
 ## Run with the editor headless:
 ##   set SUBSTANCE_BRIDGE_SELFTEST=<path to tarmac.sbsar>
-##   godot --headless --editor --path <project>
+##   godot --headless --editor --path <project> --log-file <temp>/selftest.log
+##
+## Pass --log-file: test runs share the project's log folder, and Godot keeps only five logs,
+## so without it a test run pushes out the log of an editor you have open.
+## Headless has no progress dialogs; run once without --headless to catch editor-UI errors.
 
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
 const Pipeline := preload("res://addons/substance_bridge/core/pipeline.gd")

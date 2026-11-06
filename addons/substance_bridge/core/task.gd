@@ -26,4 +26,8 @@ func _run(work: Callable) -> void:
 
 func _finish(result: Variant) -> void:
 	_thread.wait_to_finish()
+	# _finish runs inside the deferred-call flush. Resume the awaiting code on the next normal
+	# frame instead: editor progress dialogs (shown by reimport_files) refuse to run during the
+	# flush and spam "Do not use progress dialog ... while flushing the message queue".
+	await (Engine.get_main_loop() as SceneTree).process_frame
 	finished.emit(result)

@@ -323,6 +323,10 @@ func _selected_meshes() -> Array[MeshInstance3D]:
 
 
 func _refresh() -> void:
+	# After a script hot-reload the live dock keeps its old controls; members added since are
+	# null until the plugin is re-enabled. Skip the refresh rather than error on every change.
+	if _bake_button == null or _final_button == null:
+		return
 	var has := current != null
 	var mesh_usages := current.mesh_usages() if has else PackedStringArray()
 	_edit_button.disabled = not has

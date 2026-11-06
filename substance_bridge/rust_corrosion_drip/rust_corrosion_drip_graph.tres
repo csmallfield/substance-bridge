@@ -4,15 +4,14 @@
 
 [resource]
 script = ExtResource("1_udb8j")
-source = "C:/Program Files/Allegorithmic/Adobe Substance 3D for Maya/2022/sbsars/pounded_asphalt.sbsar"
+source = "C:/Program Files/Allegorithmic/Adobe Substance 3D for Maya/2022/sbsars/rusted_painted_metal.sbsar"
 final_size = 12
+bake_size = 12
 output_name = "rust_corrosion_drip"
 values = {
-"color": Color(0.382115, 0.401777, 0.413793, 1),
-"contrast": -0.31000000000000005,
-"hue_shift": 0.28,
-"luminosity": 0.36,
-"normal_intensity": 0.67,
-"paint_amount": 0.86,
-"paint_color": Color(0.574713, 0.263983, 0.289176, 1)
+"color_paint": Color(0.18532601, 0.25213113, 0.34452736, 1),
+"rust_amount": 0.38,
+"rust_spread": 0.23,
+"variation": 0.8,
+"wetness": 0.45
 }

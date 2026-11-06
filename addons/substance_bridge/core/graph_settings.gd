@@ -11,6 +11,7 @@ const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const Task := preload("res://addons/substance_bridge/core/task.gd")
 const GraphDescription := preload("res://addons/substance_bridge/backends/graph_description.gd")
 const SubstanceBackend := preload("res://addons/substance_bridge/backends/substance/substance_backend.gd")
+const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
 
 ## Emitted when something that affects the rendered maps changes (debounced by the dock).
 signal parameters_changed
@@ -22,6 +23,7 @@ const SIZE_NAMES := {8: "256", 9: "512", 10: "1K", 11: "2K", 12: "4K"}
 ## Our own property names; graph parameters with these ids get a "param_" prefix.
 const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_preview",
 		"material", "values", "output_name", "last_render_key", "backend_id", "preset",
+		"bake_size", "baked_mesh", "mesh_obj",
 		"script", "resource_name", "resource_path", "resource_local_to_scene", "resource_scene_unique_id"]
 
 @export_global_file("*.sbsar") var source := "":
@@ -51,6 +53,23 @@ const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_
 
 ## Re-render a preview automatically after each change.
 @export var auto_preview := true
+
+## Size of the mesh maps (AO, curvature, ...) baked for mesh-adaptive graphs. They are baked
+## once per mesh and size and reused by every preview and final render.
+@export_enum("1K:10", "2K:11", "4K:12") var bake_size := 11:
+	set(v):
+		bake_size = v
+		_params_changed()
+
+## Mesh the maps are baked from (set with the dock's "Bake from Selected Mesh").
+@export_custom(PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY)
+var baked_mesh := ""
+
+## The mesh, exported as OBJ into the cache: user://substance_bridge/meshes/<md5>.obj.
+@export_storage var mesh_obj := "":
+	set(v):
+		mesh_obj = v
+		_params_changed()
 
 ## The material this resource generates: <output_name>.tres next to this file. Shown in the
 ## inspector but not saved, so tracked settings never reference generated (git-ignored) files.
@@ -89,7 +108,21 @@ func is_described() -> bool:
 ## Hash of everything that affects the rendered maps at this size.
 func render_key(size_log2: int) -> String:
 	var mtime := FileAccess.get_modified_time(source) if FileAccess.file_exists(source) else 0
-	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2]).md5_text()
+	var mesh := [mesh_obj, bake_size] if not mesh_usages().is_empty() else []
+	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2, mesh]).md5_text()
+
+
+## Mesh-map usages the graph takes as image inputs and the baker can produce, e.g.
+## ["ambientOcclusion", "curvature"]. Empty for plain tiling materials.
+func mesh_usages() -> PackedStringArray:
+	var usages := PackedStringArray()
+	if _description == null:
+		return usages
+	for p in _description.image_inputs():
+		for u: String in p.get("usages", PackedStringArray()):
+			if u in MeshBaker.BAKERS and not u in usages:
+				usages.append(u)
+	return usages
 
 
 func size_name(size_log2: int) -> String:

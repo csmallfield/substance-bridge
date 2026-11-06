@@ -33,6 +33,7 @@ var _sbsar_edit: LineEdit
 var _create_button: Button
 var _current_label: Label
 var _edit_button: Button
+var _bake_button: Button
 var _auto_check: CheckBox
 var _preview_button: Button
 var _final_button: Button
@@ -78,6 +79,12 @@ func _init() -> void:
 		if current:
 			EditorInterface.edit_resource(current))
 	add_child(_edit_button)
+
+	_bake_button = Button.new()
+	_bake_button.text = "Bake from Selected Mesh"
+	_bake_button.tooltip_text = "Bake this graph's mesh maps (AO, curvature, ...) from the selected MeshInstance3D and re-render."
+	_bake_button.pressed.connect(_on_bake_pressed)
+	add_child(_bake_button)
 
 	_auto_check = CheckBox.new()
 	_auto_check.text = "Auto preview on change"
@@ -151,9 +158,11 @@ func set_current(gs: GraphSettings) -> void:
 		return
 	if current and current.parameters_changed.is_connected(_on_parameters_changed):
 		current.parameters_changed.disconnect(_on_parameters_changed)
+		current.description_loaded.disconnect(_refresh)
 	current = gs
 	if current:
 		current.parameters_changed.connect(_on_parameters_changed)
+		current.description_loaded.connect(_refresh)
 	_refresh()
 
 
@@ -188,11 +197,52 @@ func create_material(sbsar: String, targets: Array[MeshInstance3D]) -> GraphSett
 		set_status("Could not create the settings resource. See the log.")
 		return null
 	set_current(gs)
+	if not gs.is_described():
+		set_status("Reading %s..." % sbsar.get_file())
+		await gs.description_loaded
+	# Mesh-adaptive graph: bake its mesh maps from the first selected mesh.
+	if not gs.mesh_usages().is_empty():
+		_busy = true
+		_refresh()
+		set_status("Exporting %s for baking..." % targets[0].name)
+		var err: String = await _pipeline.set_mesh(gs, targets[0])
+		_busy = false
+		if not err.is_empty():
+			set_status(err)
+			return gs
 	await _run(Job.PREVIEW)
 	if gs.material:
 		apply_material(gs.material, targets)
 		EditorInterface.edit_resource(gs)
 	return gs
+
+
+func _on_bake_pressed() -> void:
+	var targets := _selected_meshes()
+	if current == null or targets.is_empty():
+		set_status("Select the MeshInstance3D to bake from.")
+		return
+	await bake_from_mesh(targets[0])
+
+
+## Points the current settings at a mesh, re-renders (baking its maps) and applies the
+## material to it. Also used by the self-test.
+func bake_from_mesh(mi: MeshInstance3D) -> void:
+	if current == null or _busy:
+		return
+	_busy = true
+	_refresh()
+	set_status("Exporting %s for baking..." % mi.name)
+	var err: String = await _pipeline.set_mesh(current, mi)
+	_busy = false
+	_debounce.stop()  # set_mesh changed the settings; render once, now
+	if not err.is_empty():
+		set_status(err)
+		_refresh()
+		return
+	await _run(Job.PREVIEW)
+	if current.material and mi.material_override != current.material:
+		apply_material(current.material, [mi] as Array[MeshInstance3D])
 
 
 func apply_material(mat: Material, targets: Array[MeshInstance3D]) -> void:
@@ -274,16 +324,24 @@ func _selected_meshes() -> Array[MeshInstance3D]:
 
 func _refresh() -> void:
 	var has := current != null
+	var mesh_usages := current.mesh_usages() if has else PackedStringArray()
 	_edit_button.disabled = not has
 	_auto_check.disabled = not has
 	_preview_button.disabled = not has or _busy
 	_final_button.disabled = not has or _busy
 	_create_button.disabled = _busy
+	_bake_button.visible = not mesh_usages.is_empty()
+	_bake_button.disabled = _busy
 	if has:
 		_auto_check.set_pressed_no_signal(current.auto_preview)
-		_current_label.text = "%s\npreview %s, final %s, %d changed parameter(s)" % [
+		var mesh_line := ""
+		if not mesh_usages.is_empty():
+			mesh_line = "\nmesh maps (%s) at %s from %s" % [", ".join(mesh_usages),
+					current.size_name(current.bake_size),
+					current.baked_mesh if not current.baked_mesh.is_empty() else "(no mesh yet)"]
+		_current_label.text = "%s\npreview %s, final %s, %d changed parameter(s)%s" % [
 				current.output_name, current.size_name(current.preview_size),
-				current.size_name(current.final_size), current.values.size()]
+				current.size_name(current.final_size), current.values.size(), mesh_line]
 		_final_button.text = "Render Final (%s)" % current.size_name(current.final_size)
 	else:
 		_current_label.text = "(none: create one, or select a mesh that uses one)"

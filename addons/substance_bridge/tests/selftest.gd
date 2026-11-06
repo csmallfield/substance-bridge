@@ -112,11 +112,55 @@ func run(dock: Node, sbsar: String) -> void:
 	# The scene is not saved: the committed test scene must not reference generated files.
 	# Remove this run's generated folder so test output never lands in git.
 	rock.material_override = null
+	_cleanup(gs)
+
+	var mesh_sbsar := OS.get_environment("SUBSTANCE_BRIDGE_SELFTEST_MESH")
+	if not mesh_sbsar.is_empty():
+		await _mesh_adaptive(dock, rock, mesh_sbsar)
+	fs.scan()
+	_quit()
+
+
+## Mesh-adaptive graph (image inputs with mesh-map usages, e.g. PL_ISF_Gen_Edging01).
+func _mesh_adaptive(dock: Node, rock: MeshInstance3D, sbsar: String) -> void:
+	print("[selftest] mesh-adaptive: ", sbsar)
+	await _wait_idle(dock)
+	var gs: GraphSettings = await dock.create_material(sbsar, [rock] as Array[MeshInstance3D])
+	_expect(gs != null and gs.material != null and gs.material.albedo_texture != null, "mesh-adaptive material created")
+	if gs == null or gs.material == null:
+		return
+	_expect(gs.mesh_usages() == PackedStringArray(["ambientOcclusion", "curvature"]), "graph takes %s" % ", ".join(gs.mesh_usages()))
+	_expect(gs.mesh_obj.begins_with("user://substance_bridge/meshes/") and FileAccess.file_exists(ProjectSettings.globalize_path(gs.mesh_obj)),
+			"mesh exported for baking: %s" % gs.baked_mesh)
+	var bakes := ProjectSettings.globalize_path("user://substance_bridge/bakes")
+	var key := gs.mesh_obj.get_file().get_basename()
+	_expect(FileAccess.file_exists(bakes.path_join("%s_11" % key).path_join("ambientOcclusion.png"))
+			and FileAccess.file_exists(bakes.path_join("%s_11" % key).path_join("curvature.png")), "AO + curvature baked at 2K")
+	_expect(rock.material_override == gs.material, "mesh-adaptive material applied to Rock")
+
+	if OS.get_environment("SUBSTANCE_BRIDGE_KEEP") == "1":
+		var packed := PackedScene.new()
+		packed.pack(EditorInterface.get_edited_scene_root())
+		ResourceSaver.save(packed, "res://test/_demo_mesh_adaptive.tscn")
+		print("[selftest] kept output; demo scene res://test/_demo_mesh_adaptive.tscn")
+
+	gs.bake_size = 10
+	await _wait_idle(dock)
+	_expect(FileAccess.file_exists(bakes.path_join("%s_10" % key).path_join("curvature.png")), "changing the bake size re-bakes at 1K")
+
+	gs.auto_preview = false
+	gs.mesh_obj = ""
+	var r: Dictionary = await Pipeline.new().render(gs, gs.preview_size)
+	_expect(String(r.get("error", "")).contains("Bake from Selected Mesh"), "missing mesh is explained: %s" % r.get("error", "no error"))
+	if OS.get_environment("SUBSTANCE_BRIDGE_KEEP") != "1":
+		rock.material_override = null
+		_cleanup(gs)
+
+
+func _cleanup(gs: GraphSettings) -> void:
 	var folder := gs.resource_path.get_base_dir()
 	_remove_dir(ProjectSettings.globalize_path(folder))
-	fs.scan()
 	print("[selftest] removed ", folder)
-	_quit()
 
 
 static func _remove_dir(abs_path: String) -> void:

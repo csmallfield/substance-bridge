@@ -12,6 +12,8 @@ const SubstanceBackend := preload("res://addons/substance_bridge/backends/substa
 const RenderRequest := preload("res://addons/substance_bridge/backends/render_request.gd")
 const RenderResult := preload("res://addons/substance_bridge/backends/render_result.gd")
 const MaterialBuilder := preload("res://addons/substance_bridge/material/material_builder.gd")
+const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
+const ObjWriter := preload("res://addons/substance_bridge/core/obj_writer.gd")
 
 const SETTINGS_META := "substance_bridge_settings"
 
@@ -61,15 +63,22 @@ func render(gs: GraphSettings, size_log2: int) -> Dictionary:
 
 	var request := RenderRequest.new()
 	request.source = gs.source
-	request.description = gs.get_description()  # may be null; the backend then describes itself
+	request.description = gs.get_description()  # may be null; described on the worker then
 	request.values = gs.values.duplicate(true)
 	request.random_seed = gs.random_seed
 	request.size_log2 = Vector2i(size_log2, size_log2)
 	request.output_dir = String(config["cache_dir"]).path_join("renders").path_join(gs.output_name)
 
+	var mesh_obj := ProjectSettings.globalize_path(gs.mesh_obj) if not gs.mesh_obj.is_empty() else ""
+	var bake_dir := String(config["cache_dir"]).path_join("bakes").path_join(
+			"%s_%d" % [gs.mesh_obj.get_file().get_basename(), gs.bake_size])
+	var bake_size := gs.bake_size
+	var sbsbaker := String(config["sbsbaker"])
+
 	var started := Time.get_ticks_msec()
 	var task := Task.new()
-	task.start(func() -> RenderResult: return backend.render(request))
+	task.start(func() -> RenderResult:
+		return _bake_and_render(backend, request, sbsbaker, mesh_obj, bake_size, bake_dir))
 	var result: RenderResult = await task.finished
 	for cmd in result.commands:
 		_log(cmd)
@@ -100,6 +109,80 @@ func render(gs: GraphSettings, size_log2: int) -> Dictionary:
 	_log("%s at %s: render %.2f s, total %.2f s" % [gs.output_name, gs.size_name(size_log2),
 			result.duration_ms / 1000.0, seconds])
 	return {"material": mat, "skipped": false, "seconds": seconds}
+
+
+## Worker thread: bakes the mesh maps the graph takes (cached), wires them to its image
+## inputs by usage, then renders.
+static func _bake_and_render(backend: SubstanceBackend, request: RenderRequest, sbsbaker: String,
+		mesh_obj: String, bake_size: int, bake_dir: String) -> RenderResult:
+	if request.description == null:
+		request.description = backend.describe(request.source)
+	var desc := request.description
+	if desc.is_ok():
+		var wanted := {}  # usage -> image input id
+		for p in desc.image_inputs():
+			for u: String in p.get("usages", PackedStringArray()):
+				if u in MeshBaker.BAKERS and not wanted.has(u):
+					wanted[u] = p["id"]
+		if not wanted.is_empty():
+			if mesh_obj.is_empty() or not FileAccess.file_exists(mesh_obj):
+				var missing := RenderResult.new()
+				missing.errors.append("This graph takes mesh maps (%s). Select the mesh and press \"Bake from Selected Mesh\"."
+						% ", ".join(PackedStringArray(wanted.keys())))
+				return missing
+			var baked := MeshBaker.bake(sbsbaker, mesh_obj, PackedStringArray(wanted.keys()), bake_size, bake_dir)
+			if not baked["errors"].is_empty():
+				var failed := RenderResult.new()
+				failed.commands.append_array(baked["commands"])
+				failed.errors.append_array(baked["errors"])
+				return failed
+			for u: String in baked["maps"]:
+				request.image_inputs[wanted[u]] = baked["maps"][u]
+			var result := backend.render(request)
+			var note := "Mesh maps %s: %s" % [
+					"baked in %.1f s" % baked["seconds"] if baked["baked"] > 0 else "from cache",
+					", ".join(PackedStringArray(baked["maps"].keys()))]
+			var commands := PackedStringArray(baked["commands"])
+			commands.append(note)
+			commands.append_array(result.commands)
+			result.commands = commands
+			return result
+	return backend.render(request)
+
+
+## Exports a MeshInstance3D's mesh as OBJ into the cache and points the settings at it.
+## Returns an error message, or "".
+func set_mesh(gs: GraphSettings, mi: MeshInstance3D) -> String:
+	if mi == null or mi.mesh == null:
+		return "Select a MeshInstance3D with a mesh."
+	var surfaces := ObjWriter.collect_arrays(mi.mesh)
+	var vertex_count := 0
+	for s: Dictionary in surfaces:
+		vertex_count += (s["vertices"] as PackedVector3Array).size()
+	var cache_dir := ProjectSettings.globalize_path("user://substance_bridge/meshes")
+	var task := Task.new()
+	task.start(func() -> Dictionary:
+		DirAccess.make_dir_recursive_absolute(cache_dir)
+		var tmp := cache_dir.path_join("export_%d.obj" % Time.get_ticks_usec())
+		var err := ObjWriter.write(surfaces, tmp)
+		if not err.is_empty():
+			return {"error": err}
+		var md5 := FileAccess.get_md5(tmp)
+		var final := cache_dir.path_join(md5 + ".obj")
+		if FileAccess.file_exists(final):
+			DirAccess.remove_absolute(tmp)
+		else:
+			DirAccess.rename_absolute(tmp, final)
+		return {"md5": md5})
+	var r: Dictionary = await task.finished
+	if r.has("error"):
+		return r["error"]
+	gs.baked_mesh = "%s (%d vertices)" % [mi.name, vertex_count]
+	gs.mesh_obj = "user://substance_bridge/meshes/%s.obj" % r["md5"]
+	if not gs.resource_path.is_empty():
+		ResourceSaver.save(gs, gs.resource_path)
+	_log("Mesh for baking: %s" % gs.baked_mesh)
+	return ""
 
 
 ## The GraphSettings that generated a material, or null.

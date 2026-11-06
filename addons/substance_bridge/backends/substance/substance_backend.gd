@@ -7,8 +7,8 @@ const ToolRunner := preload("res://addons/substance_bridge/core/tool_runner.gd")
 const SbsarReader := preload("res://addons/substance_bridge/backends/substance/sbsar_reader.gd")
 
 ## stderr text that means the render did not do what was asked, even with exit code 0.
+## ("Image input "<id>" has not been set" is only fatal for ids we passed; see render().)
 const RENDER_FATAL := [
-	"has not been set",        # image input not set / unknown --set-entry id
 	"Could not load image",    # --set-entry file missing or unreadable
 	"Result cannot be saved",  # output folder problem (exit 303)
 ]
@@ -95,7 +95,17 @@ func render(request: RenderRequest) -> RenderResult:
 
 	var run := ToolRunner.run(_config.get("sbsrender", ""), args, PackedStringArray(RENDER_FATAL))
 	res.commands.append(run.command_line())
-	res.warnings.append_array(run.warnings)
+	# An image input we passed that sbsrender did not take (wrong id) is a failure; other
+	# unset image inputs are optional ones we left alone, so only a warning.
+	for w in run.warnings:
+		var failed_entry := false
+		for id: String in request.image_inputs:
+			if w.contains("Image input \"%s\" has not been set" % id):
+				failed_entry = true
+		if failed_entry:
+			run.errors.append(w)
+		else:
+			res.warnings.append(w)
 	if not run.is_ok():
 		res.errors.append_array(run.errors)
 		res.duration_ms = Time.get_ticks_msec() - started

@@ -364,3 +364,22 @@ Expected (not yet seen): `1` float2, `3` float4, `6` string, `9`/`10` int3/int4.
 
 Checks: `addons/substance_bridge/tests/runner_check.gd`, `backend_check.gd` (headless `--script`),
 and `selftest.gd` (headless editor with `SUBSTANCE_BRIDGE_SELFTEST=<sbsar>`).
+
+## 7. Mesh-adaptive baking from Godot (verified, phase 4)
+
+- The plugin always bakes from an **OBJ it writes from the selected Godot mesh**: positions,
+  normals and UV0, in mesh local space. That's the exact mesh and UVs Godot renders, it works
+  for glTF/procedural meshes, and it avoids FBX node-name matching.
+  - UV V flips (`v_obj = 1 - v`) and triangle winding reverses (Godot clockwise → OBJ CCW).
+  - Bakes from the exported OBJ match bakes from `rock01.fbx`: world normal and curvature
+    are identical (diff 0.00 and 0.01 out of 255), and AO differs by 1.17/255 (ray noise).
+  - Export of the rock (38,564 vertices) takes 0.8 s and writes a 6.9 MB OBJ.
+- **Running the bakers in parallel** (one `sbsbaker` per map, each on its own thread):
+  4 maps at 2K take 4.8 s, against 13.4 s one after another.
+- Image-input usage names (from Designer's library packages): `ambientOcclusion`,
+  `curvature`, `position`, `normalWS` (world-space normal), `thickness`.
+  `thickness-from-mesh --use-lowdef-as-highdef true` works (2.0 s at 1K).
+- Bakes are cached in `user://substance_bridge/bakes/<obj md5>_<size>/<usage>.png`, so every
+  preview and final render reuses them.
+- `sbsrender` warns `Image input "<id>" has not been set` for optional image inputs it
+  wasn't given. That's only treated as a failure for ids the plugin passed with `--set-entry`.

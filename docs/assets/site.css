@@ -53,6 +53,8 @@
 
 * { box-sizing: border-box; }
 
+img { max-width: 100%; height: auto; }
+
 html { scroll-behavior: smooth; scroll-padding-top: 24px; }
 
 body {

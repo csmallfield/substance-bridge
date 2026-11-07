@@ -25,6 +25,8 @@
     <li class="sub"><a href="#live">Live editing</a></li>
     <li class="sub"><a href="#preview-panel">2D preview panel</a></li>
     <li><a href="#slots">Material slots</a></li>
+    <li><a href="#tiling">Tiling and projection</a></li>
+    <li class="sub"><a href="#projection">Projection</a></li>
     <li><a href="#materials">How materials are built</a></li>
     <li><a href="#variants">Seed variants</a></li>
     <li><a href="#batch">Batch rendering</a></li>
@@ -70,6 +72,7 @@
   <div class="card"><h3>Mesh-fitted materials</h3><p>Mesh-adaptive graphs get AO, curvature, position and world normal baked from the selected mesh.</p></div>
   <div class="card"><h3>Variants and batch</h3><p>Many seeds from one graph, one per mesh; re-render every material at any size.</p></div>
   <div class="card"><h3>Native baker</h3><p>Bake mesh maps inside Godot, with no Substance tools, close to <code>sbsbaker</code>'s results.</p></div>
+  <div class="card"><h3>Tiling and projection</h3><p>Repeat textures on the material, or bake planar, triplanar, cylindrical or spherical projections into any UV layout.</p></div>
   <div class="card"><h3>Substance library</h3><p>Browse your <code>.sbsar</code> folders as sphere thumbnails, with an orbitable preview and each graph's inputs, parameters and outputs.</p></div>
   <div class="card"><h3>Noise Lab backend</h3><p>Grunge Maps and standalone noises rebuilt in Godot, with the same Inspector and previews.</p></div>
 </div>
@@ -329,6 +332,54 @@
 </figure>
 
 <!-- ============================================================ -->
+<h2 id="tiling">Tiling and projection</h2>
+
+<p>Two groups in the Inspector, above the graph's parameters, decide how the maps sit on the mesh.</p>
+
+<h3>Tiling</h3>
+<p><strong>Scale</strong> sets how many times the textures repeat across the mesh's UVs (X and Y, linked by default), and <strong>Offset</strong> shifts them. Both go straight onto the material's UV scale and offset: nothing is re-rendered, and the change is saved with the material. Godot's standard material has no UV rotation, so tiling has none; a projection does.</p>
+<p>Tiling is hidden for mesh-adaptive graphs and for projections: their maps are made for the mesh's own UV layout, and repeating them would break that.</p>
+
+<h3 id="projection">Projection</h3>
+<p>By default the maps follow the mesh's UVs. A projection instead places them by the mesh's 3D shape, then bakes the result into its UV layout. That suits meshes with auto-generated or messy UVs: the islands can be scattered, rotated and differently sized, and the texture still runs continuously across their seams.</p>
+
+<figure>
+  <img src="images/30_view_projection.webp" width="1063" height="902" alt="Two copies of a rock with auto-generated UVs: tarmac through the UVs on the left is chopped into patches; triplanar on the right is continuous">
+  <figcaption>The same rock with auto-generated UVs. Left: tarmac through those UVs, chopped into patches. Right: triplanar projection, baked into the same UVs.</figcaption>
+</figure>
+
+<div class="side">
+  <div>
+    <table>
+      <thead><tr><th>Projection</th><th>Controls</th></tr></thead>
+      <tbody>
+        <tr><td>UV</td><td>None: the mesh's own UVs (default)</td></tr>
+        <tr><td>Planar</td><td>Axis, Tile Size</td></tr>
+        <tr><td>Triplanar</td><td>Tile Size, Sharpness (soft blend up to a hard box)</td></tr>
+        <tr><td>Cylindrical</td><td>Axis, Tile Size (along), Repeats X (around)</td></tr>
+        <tr><td>Spherical</td><td>Axis, Repeats (around, pole to pole)</td></tr>
+      </tbody>
+    </table>
+    <p>Every projection also has <strong>Offset</strong> (from the centre of the mesh's bounds) and <strong>Rotation</strong> (degrees). <strong>Fit to Mesh</strong> sets the tile size to the mesh's largest dimension and re-centres it. Projections are in the mesh's own space, so they move with it.</p>
+  </div>
+  <figure>
+    <img class="ui" src="images/31_inspector_projection.webp" width="431" height="807" alt="The Projection group in the Inspector: Triplanar, Tile Size, Sharpness, Offset, Rotation and Fit to Mesh">
+    <figcaption>The Projection group, set to triplanar.</figcaption>
+  </figure>
+</div>
+
+<ol class="steps">
+  <li>Pick a projection in the Inspector.</li>
+  <li>Select the mesh and press <strong>Bake from Selected Mesh</strong> in the dock (it appears once a projection is chosen). The material is now made for that mesh, like a mesh-adaptive one.</li>
+  <li>Press <strong>Fit to Mesh</strong>, then adjust the tile size. Changes update live, like any parameter.</li>
+</ol>
+
+<p>Every map of the render is projected in one batch on the GPU, about 0.1–0.3 s, then the empty texels around the UV islands are filled so filtering doesn't bleed. Height and other float maps stay float. Normal maps are re-oriented into the mesh's own tangent space, so they shade correctly however the UVs are laid out. The test checks this by projecting onto a flat plane, where the result must match the source exactly.</p>
+
+<div class="callout">
+  <p>The mesh needs UVs that don't overlap, because the projection is baked into them. Any automatic unwrap will do. Projection isn't offered for mesh-adaptive graphs, whose maps already follow the mesh. Alpha isn't projected, so projected maps come out opaque.</p>
+</div>
+<!-- ============================================================ -->
 <h2 id="materials">How materials are built</h2>
 
 <p>By default, outputs are matched to material slots by their declared usage, never by file name (to send them elsewhere, see <a href="#slots">Material slots</a>):</p>
@@ -552,6 +603,8 @@ user://substance_bridge/           per-machine cache
     <tr><td>Bake Size</td><td>1K, 2K (default), 4K (mesh-adaptive graphs)</td></tr>
     <tr><td>Baker</td><td>Substance (default) or Native</td></tr>
     <tr><td>Material Slots</td><td>Per slot: Source (Auto, None or an output), Strength, Invert, Min, Max (see <a href="#slots">Material slots</a>)</td></tr>
+    <tr><td>Tiling</td><td>Scale (default 1, 1), Offset; on the material, no render (see <a href="#tiling">Tiling</a>)</td></tr>
+    <tr><td>Projection</td><td>UV (default), Planar, Triplanar, Cylindrical, Spherical, with Axis, Tile Size, Repeats, Sharpness, Offset, Rotation (see <a href="#projection">Projection</a>)</td></tr>
   </tbody>
 </table>
 
@@ -585,7 +638,7 @@ godot --headless --path . --script res://addons/substance_bridge/tests/obj_check
 godot --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
 godot --headless --path . --script res://addons/substance_bridge/tests/routing_check.gd
 godot --path . --script res://addons/substance_bridge/tests/native_bake_check.gd</code></pre>
-<p>The editor self-test drives the dock end to end: create, Inspector, previews, variants, batch, mesh-adaptive baking with both bakers, and the Noise Lab. Set <code>SUBSTANCE_BRIDGE_SELFTEST</code> to <code>tarmac.sbsar</code>, optionally <code>SUBSTANCE_BRIDGE_SELFTEST_MESH</code> and <code>SUBSTANCE_BRIDGE_SELFTEST_NOISE</code>, then run the editor with <code>--log-file</code>. Run it windowed on a copy of the project. The library has its own editor test, <code>tests/library_test.gd</code>: set <code>SUBSTANCE_BRIDGE_LIBRARY</code> to a scratch folder of <code>.sbsar</code> files (with subfolders, including <code>tarmac.sbsar</code> and a mesh-driven graph) and run the editor. It points the library at that folder for the run and restores your folders afterwards. The screenshots on this page come from <code>tests/tour.gd</code>, run the same way with <code>SUBSTANCE_BRIDGE_TOUR</code> set to an output folder (add <code>SUBSTANCE_BRIDGE_TOUR_LIBRARY</code> for the library shots only).</p>
+<p>The editor self-test drives the dock end to end: create, Inspector, previews, variants, batch, mesh-adaptive baking with both bakers, and the Noise Lab. Set <code>SUBSTANCE_BRIDGE_SELFTEST</code> to <code>tarmac.sbsar</code>, optionally <code>SUBSTANCE_BRIDGE_SELFTEST_MESH</code> and <code>SUBSTANCE_BRIDGE_SELFTEST_NOISE</code>, then run the editor with <code>--log-file</code>. Run it windowed on a copy of the project. Projection and tiling have <code>tests/projection_test.gd</code>: set <code>SUBSTANCE_BRIDGE_PROJECTION</code> to <code>tarmac.sbsar</code>. It checks the plane identity for colour and normal maps, every projection on a box and a sphere, and the whole flow in the dock (it removes the material it makes). The library has its own editor test, <code>tests/library_test.gd</code>: set <code>SUBSTANCE_BRIDGE_LIBRARY</code> to a scratch folder of <code>.sbsar</code> files (with subfolders, including <code>tarmac.sbsar</code> and a mesh-driven graph) and run the editor. It points the library at that folder for the run and restores your folders afterwards. The screenshots on this page come from <code>tests/tour.gd</code>, run the same way with <code>SUBSTANCE_BRIDGE_TOUR</code> set to an output folder (add <code>SUBSTANCE_BRIDGE_TOUR_LIBRARY</code> for the library shots only).</p>
 
 <footer>
   <p>Substance Bridge is a private project. Substance, Substance Designer and the Substance Automation Toolkit are Adobe products; this plugin only calls their command-line tools. Screenshots: Godot 4.7, RTX 3080, November 2026.</p>

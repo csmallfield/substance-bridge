@@ -44,6 +44,13 @@ func _enter_tree() -> void:
 		_selftest.run.call_deferred(_dock, tour)
 		return
 
+	var projection_test := OS.get_environment("SUBSTANCE_BRIDGE_PROJECTION")
+	if not projection_test.is_empty():
+		_selftest = load("res://addons/substance_bridge/tests/projection_test.gd").new()
+		_selftest.plugin = self
+		_selftest.run.call_deferred(_dock, projection_test)
+		return
+
 	var library_test := OS.get_environment("SUBSTANCE_BRIDGE_LIBRARY")
 	if not library_test.is_empty():
 		_selftest = load("res://addons/substance_bridge/tests/library_test.gd").new()

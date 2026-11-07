@@ -25,6 +25,9 @@ const SIZE_NAMES := {8: "256", 9: "512", 10: "1K", 11: "2K", 12: "4K"}
 const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_preview",
 		"material", "values", "output_name", "last_render_key", "backend_id", "preset",
 		"bake_size", "baked_mesh", "mesh_obj", "baker", "routes",
+		"uv_scale", "uv_offset", "projection", "projection_axis", "projection_tile_size",
+		"projection_repeats", "projection_sharpness", "projection_offset", "projection_rotation",
+		"projection_fit",
 		"script", "resource_name", "resource_path", "resource_local_to_scene", "resource_scene_unique_id"]
 
 ## The .sbsar this material is generated from. Read-only in the inspector: the folder,
@@ -104,6 +107,63 @@ var material: StandardMaterial3D:
 ## only what differs from the defaults. Edited as the inspector's Material Slots group.
 @export_storage var routes := {}
 
+@export_group("Tiling", "uv_")
+## How many times the textures repeat across the mesh's UVs. Set on the material directly:
+## no re-render. Not used by mesh-adaptive graphs or projections (their maps follow the mesh).
+@export_custom(PROPERTY_HINT_LINK, "") var uv_scale := Vector2.ONE:
+	set(v):
+		uv_scale = v
+		apply_tiling()
+## Shifts the textures across the UVs, in repeats.
+@export var uv_offset := Vector2.ZERO:
+	set(v):
+		uv_offset = v
+		apply_tiling()
+
+@export_group("Projection", "projection_")
+## UV uses the mesh's own UVs. The others project the maps onto the mesh from its 3D shape and
+## bake the result into its UV layout: good for auto-generated UVs. They need the mesh, set
+## with the dock's "Bake from Selected Mesh"; the material then fits that mesh only.
+@export_enum("UV (mesh UVs)", "Planar", "Triplanar", "Cylindrical", "Spherical") var projection := 0:
+	set(v):
+		projection = v
+		notify_property_list_changed()
+		apply_tiling()  # projected maps follow the mesh: no tiling on the material
+		_params_changed()
+## Axis the projection looks along (planar), or runs around (cylindrical, spherical).
+@export_enum("X", "Y", "Z") var projection_axis := 1:
+	set(v):
+		projection_axis = v
+		_params_changed()
+## Size of one texture repeat, in the mesh's units (planar, triplanar; along a cylinder).
+@export_range(0.001, 100.0, 0.001, "or_greater", "exp") var projection_tile_size := 1.0:
+	set(v):
+		projection_tile_size = v
+		_params_changed()
+## Repeats around the axis (x) and from pole to pole (y, spherical only).
+@export_custom(PROPERTY_HINT_LINK, "") var projection_repeats := Vector2(4, 2):
+	set(v):
+		projection_repeats = v
+		_params_changed()
+## Triplanar blend between the three directions: low is soft, high is a hard box mapping.
+@export_range(1.0, 32.0, 0.5) var projection_sharpness := 4.0:
+	set(v):
+		projection_sharpness = v
+		_params_changed()
+## Moves the projection's centre away from the centre of the mesh's bounds.
+@export var projection_offset := Vector3.ZERO:
+	set(v):
+		projection_offset = v
+		_params_changed()
+## Rotates the projection (degrees).
+@export_custom(PROPERTY_HINT_RANGE, "-360,360,0.1,or_less,or_greater,degrees") var projection_rotation := Vector3.ZERO:
+	set(v):
+		projection_rotation = v
+		_params_changed()
+## Sets the tile size to the mesh's largest dimension and re-centres: one repeat across it.
+@export_tool_button("Fit to Mesh", "ToolScale") var projection_fit := fit_projection_to_mesh
+@export_group("")
+
 ## Hash of the inputs of the last render this session; identical inputs are not rendered
 ## again. Not saved (it is cache state), so the first preview after a restart renders once.
 var last_render_key := ""
@@ -125,7 +185,92 @@ func is_described() -> bool:
 func render_key(size_log2: int) -> String:
 	var mtime := FileAccess.get_modified_time(source) if FileAccess.file_exists(source) else 0
 	var mesh := [mesh_obj, bake_size, baker] if not mesh_usages().is_empty() else []
-	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2, mesh, routes]).md5_text()
+	var proj := [mesh_obj, projection_settings()] if uses_projection() else []
+	return var_to_str([backend_id, source, mtime, values, random_seed, size_log2, mesh, routes, proj]).md5_text()
+
+
+## True when the maps are projected onto the mesh (not for mesh-adaptive graphs, whose maps
+## already follow the mesh's UVs).
+func uses_projection() -> bool:
+	return projection != 0 and mesh_usages().is_empty()
+
+
+## The projection as plain data for material/projector.gd.
+func projection_settings() -> Dictionary:
+	return {"mode": projection, "axis": projection_axis, "tile": projection_tile_size,
+			"repeats": projection_repeats, "sharpness": projection_sharpness,
+			"offset": projection_offset, "rotation": projection_rotation}
+
+
+## UV scale and offset for the material: the tiling, or none when the maps follow the mesh.
+func material_uv() -> Array:
+	if uses_projection() or not mesh_usages().is_empty():
+		return [Vector2.ONE, Vector2.ZERO]
+	return [uv_scale, uv_offset]
+
+
+## Puts the tiling on the material (and saves it); no render needed.
+func apply_tiling() -> void:
+	if _description == null:
+		return  # still loading from disk (the description arrives later); the render applies it
+	var mat := material
+	if mat == null:
+		return
+	var uv := material_uv()
+	var scale := Vector3(uv[0].x, uv[0].y, 1.0)
+	var offset := Vector3(uv[1].x, uv[1].y, 0.0)
+	if mat.uv1_scale == scale and mat.uv1_offset == offset:
+		return
+	mat.uv1_scale = scale
+	mat.uv1_offset = offset
+	if not mat.resource_path.is_empty():
+		ResourceSaver.save(mat, mat.resource_path)
+	emit_changed()
+
+
+## The mesh saved for baking (user://substance_bridge/meshes/<md5>.res), or null.
+func baking_mesh() -> Mesh:
+	if mesh_obj.is_empty():
+		return null
+	var res := mesh_obj.get_basename() + ".res"
+	return ResourceLoader.load(res) as Mesh if ResourceLoader.exists(res) else null
+
+
+func fit_projection_to_mesh() -> void:
+	var mesh := baking_mesh()
+	if mesh == null:
+		push_warning("Substance Bridge: no mesh yet. Select the mesh and press \"Bake from Selected Mesh\" in the dock.")
+		return
+	var size := mesh.get_aabb().size
+	projection_tile_size = snappedf(maxf(size.x, maxf(size.y, size.z)), 0.001)
+	projection_offset = Vector3.ZERO
+	notify_property_list_changed()
+
+
+func _validate_property(property: Dictionary) -> void:
+	var name := String(property["name"])
+	if not (name.begins_with("uv_") or name.begins_with("projection")):
+		return
+	var mesh_adaptive := not mesh_usages().is_empty()
+	var show := true
+	if mesh_adaptive:
+		show = false  # its maps are baked for the mesh's own UVs
+	elif name.begins_with("uv_"):
+		show = projection == 0
+	elif name != "projection":
+		match name:
+			"projection_axis":
+				show = projection in [1, 3, 4]
+			"projection_tile_size":
+				show = projection in [1, 2, 3]
+			"projection_repeats":
+				show = projection in [3, 4]
+			"projection_sharpness":
+				show = projection == 2
+			_:
+				show = projection != 0
+	if not show:
+		property["usage"] = property["usage"] & ~PROPERTY_USAGE_EDITOR
 
 
 const BAKER_SUBSTANCE := 0

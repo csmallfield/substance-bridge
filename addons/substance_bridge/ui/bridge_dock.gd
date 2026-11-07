@@ -129,7 +129,7 @@ func _init() -> void:
 
 	_bake_button = Button.new()
 	_bake_button.text = "Bake from Selected Mesh"
-	_bake_button.tooltip_text = "Bake this graph's mesh maps (AO, curvature, ...) from the selected MeshInstance3D and re-render."
+	_bake_button.tooltip_text = "Use the selected MeshInstance3D for this material: bake its mesh maps (AO, curvature, ...) or its projection, and re-render."
 	_bake_button.pressed.connect(_on_bake_pressed)
 	add_child(_bake_button)
 
@@ -544,7 +544,7 @@ func _refresh() -> void:
 	_preview_button.disabled = not has or _busy
 	_final_button.disabled = not has or _busy
 	_create_button.disabled = _busy
-	_bake_button.visible = not mesh_usages.is_empty()
+	_bake_button.visible = not mesh_usages.is_empty() or (has and current.uses_projection())
 	_bake_button.disabled = _busy
 	if has:
 		_auto_check.set_pressed_no_signal(current.auto_preview)
@@ -554,6 +554,10 @@ func _refresh() -> void:
 					current.size_name(current.bake_size),
 					current.baked_mesh if not current.baked_mesh.is_empty() else "(no mesh yet)",
 					"native" if current.baker == GraphSettings.BAKER_NATIVE else "Substance"]
+		if current.uses_projection():
+			mesh_line += "\n%s projection onto %s" % [
+					["", "planar", "triplanar", "cylindrical", "spherical"][current.projection],
+					current.baked_mesh if not current.baked_mesh.is_empty() else "(no mesh yet: Bake from Selected Mesh)"]
 		if current.is_name_mismatched():
 			mesh_line += "\nNote: renders %s; the name is from the graph it was created with." % current.source.get_file()
 		_current_label.text = "%s (%s, seed %d)\npreview %s, final %s, %d changed parameter(s)%s" % [

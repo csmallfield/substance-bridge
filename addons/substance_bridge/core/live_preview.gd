@@ -19,6 +19,7 @@ const RenderRequest := preload("res://addons/substance_bridge/backends/render_re
 const RenderResult := preload("res://addons/substance_bridge/backends/render_result.gd")
 const MaterialBuilder := preload("res://addons/substance_bridge/material/material_builder.gd")
 const Routing := preload("res://addons/substance_bridge/material/routing.gd")
+const Projector := preload("res://addons/substance_bridge/material/projector.gd")
 
 ## Live size for backends that render to files (256). sbsrender's start-up dominates below it.
 const LIVE_SIZE_LOG2 := 8
@@ -68,6 +69,8 @@ func _render_once(gs: GraphSettings) -> void:
 		out = await _render_in_memory(gs, backend)
 	else:
 		out = await _render_files(gs, config)
+	if out["errors"].is_empty() and gs.uses_projection():
+		out = await _project(gs, out)
 	var mat := gs.material
 	if not out["errors"].is_empty() or mat == null:
 		updated.emit(gs, Time.get_ticks_msec() - started, "; ".join(out["errors"]) if mat else "no material")
@@ -75,6 +78,34 @@ func _render_once(gs: GraphSettings) -> void:
 	apply_outputs(mat, gs.routes, out["outputs"], gs.output_name)
 	updated.emit(gs, Time.get_ticks_msec() - started, "")
 	outputs_ready.emit(gs, out["outputs"])
+
+
+## Projects the live images onto the settings' mesh (normal maps are OpenGL by now).
+func _project(gs: GraphSettings, out: Dictionary) -> Dictionary:
+	var mesh := gs.baking_mesh()
+	if mesh == null:
+		out["errors"] = PackedStringArray(["The projection needs the mesh: select it and press \"Bake from Selected Mesh\"."])
+		return out
+	var items := []
+	var index := {}  # Image instance id -> item id, so a shared image projects once
+	for o: Dictionary in out["outputs"]:
+		var img: Image = o["image"]
+		if index.has(img.get_instance_id()):
+			continue
+		index[img.get_instance_id()] = str(items.size())
+		items.append({"id": str(items.size()), "image": img, "normal": "normal" in Array(o.get("usages", []))})
+	var projected: Dictionary = await Projector.project(mesh, items, gs.projection_settings())
+	if not String(projected["error"]).is_empty():
+		out["errors"] = PackedStringArray([projected["error"]])
+		return out
+	var replaced := {}
+	for o: Dictionary in out["outputs"]:
+		var old: Image = o["image"]
+		o["image"] = projected["images"][index[old.get_instance_id()]]
+		replaced[old.get_instance_id()] = o["image"]
+	for u in out["images"]:
+		out["images"][u] = replaced.get((out["images"][u] as Image).get_instance_id(), out["images"][u])
+	return out
 
 
 ## Puts rendered outputs ([{id, label, usages, image}]) into mat's slots, following routes.

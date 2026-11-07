@@ -16,6 +16,9 @@ const MaterialBuilder := preload("res://addons/substance_bridge/material/materia
 const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
 const ObjWriter := preload("res://addons/substance_bridge/core/obj_writer.gd")
 const NativeBaker := preload("res://addons/substance_bridge/backends/native/native_baker.gd")
+const Projector := preload("res://addons/substance_bridge/material/projector.gd")
+const Routing := preload("res://addons/substance_bridge/material/routing.gd")
+const LivePreview := preload("res://addons/substance_bridge/core/live_preview.gd")
 
 const SETTINGS_META := "substance_bridge_settings"
 
@@ -47,6 +50,15 @@ func duplicate_settings(gs: GraphSettings, random_seed: int) -> GraphSettings:
 	v.auto_preview = gs.auto_preview
 	v.mesh_obj = gs.mesh_obj
 	v.baked_mesh = gs.baked_mesh
+	v.uv_scale = gs.uv_scale
+	v.uv_offset = gs.uv_offset
+	v.projection = gs.projection
+	v.projection_axis = gs.projection_axis
+	v.projection_tile_size = gs.projection_tile_size
+	v.projection_repeats = gs.projection_repeats
+	v.projection_sharpness = gs.projection_sharpness
+	v.projection_offset = gs.projection_offset
+	v.projection_rotation = gs.projection_rotation
 	var base := gs.output_name
 	var m := RegEx.create_from_string("_seed\\d+$").search(base)
 	if m:
@@ -101,8 +113,10 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 
 	var config := Settings.snapshot()
 	var started := Time.get_ticks_msec()
-	var result: RenderResult = await render_maps(gs, size_log2, config,
-			String(config["cache_dir"]).path_join("renders").path_join(gs.output_name), force)
+	var render_dir := String(config["cache_dir"]).path_join("renders").path_join(gs.output_name)
+	var result: RenderResult = await render_maps(gs, size_log2, config, render_dir, force)
+	if result.is_ok() and gs.uses_projection():
+		result = await project_result(gs, result, render_dir + "_projected")
 	if not result.is_ok():
 		return {"error": "; ".join(result.errors)}
 
@@ -113,9 +127,15 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 	if mat == null:
 		return {"error": "Building the material failed"}
 
-	# Link material -> settings so selecting a mesh finds its settings again.
-	if mat.get_meta(SETTINGS_META, "") != gs.resource_path:
+	# Link material -> settings so selecting a mesh finds its settings again; tiling (or none,
+	# when the maps follow the mesh) goes on the material.
+	var uv := gs.material_uv()
+	var uv_scale := Vector3(uv[0].x, uv[0].y, 1.0)
+	var uv_offset := Vector3(uv[1].x, uv[1].y, 0.0)
+	if mat.get_meta(SETTINGS_META, "") != gs.resource_path or mat.uv1_scale != uv_scale or mat.uv1_offset != uv_offset:
 		mat.set_meta(SETTINGS_META, gs.resource_path)
+		mat.uv1_scale = uv_scale
+		mat.uv1_offset = uv_offset
 		ResourceSaver.save(mat, mat.resource_path)
 	gs.material = mat
 	gs.last_render_key = key
@@ -249,6 +269,57 @@ func _bake_native(gs: GraphSettings, request: RenderRequest, cache_dir: String, 
 		_log("Native mesh maps %s: %s" % ["baked in %.1f s" % baked["seconds"] if baked["baked"] > 0 else "from cache",
 			", ".join(PackedStringArray(baked["maps"].keys()))])
 	return ""
+
+
+## Projects every map of a render onto the settings' mesh (material/projector.gd), writes the
+## results into out_dir and points the result at them. Normal maps come out OpenGL.
+func project_result(gs: GraphSettings, result: RenderResult, out_dir: String) -> RenderResult:
+	var mesh := gs.baking_mesh()
+	if mesh == null:
+		result.errors.append("The projection needs the mesh: select it and press \"Bake from Selected Mesh\".")
+		return result
+	var outputs: Array = result.outputs.duplicate()
+	if outputs.is_empty():  # backends that only fill maps
+		for usage: String in result.maps:
+			outputs.append({"id": usage, "usages": [usage], "path": result.maps[usage]})
+	var items := []
+	var seen := {}
+	for o: Dictionary in outputs:
+		var path := String(o.get("path", ""))
+		if path.is_empty() or seen.has(path) or not FileAccess.file_exists(path):
+			continue
+		var img := Image.load_from_file(path)
+		if img == null or img.is_empty():
+			result.errors.append("Could not load %s for the projection" % path)
+			return result
+		var normal := "normal" in Array(o.get("usages", []))
+		if normal and result.normal_convention == "directx":
+			LivePreview.flip_green(img)
+		seen[path] = true
+		items.append({"id": path, "image": img, "normal": normal})
+	var started := Time.get_ticks_msec()
+	var projected: Dictionary = await Projector.project(mesh, items, gs.projection_settings())
+	if not String(projected["error"]).is_empty():
+		result.errors.append(projected["error"])
+		return result
+	DirAccess.make_dir_recursive_absolute(out_dir)
+	var moved := {}
+	for path: String in projected["images"]:
+		var img: Image = projected["images"][path]
+		var float_map := Routing.is_float(img)
+		var target := out_dir.path_join(path.get_file().get_basename() + (".exr" if float_map else ".png"))
+		var err := img.save_exr(target, img.get_format() in [Image.FORMAT_RF, Image.FORMAT_RH]) if float_map else img.save_png(target)
+		if err != OK:
+			result.errors.append("Could not write %s: %s" % [target, error_string(err)])
+			return result
+		moved[path] = target
+	for o: Dictionary in result.outputs:
+		o["path"] = moved.get(o.get("path", ""), o.get("path", ""))
+	for usage: String in result.maps:
+		result.maps[usage] = moved.get(result.maps[usage], result.maps[usage])
+	result.normal_convention = "opengl"
+	result.commands.append("Projected %d map(s) onto the mesh in %.2f s" % [moved.size(), (Time.get_ticks_msec() - started) / 1000.0])
+	return result
 
 
 ## Exports a MeshInstance3D's mesh as OBJ into the cache and points the settings at it.

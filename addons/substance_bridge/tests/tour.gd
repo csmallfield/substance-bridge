@@ -38,6 +38,11 @@ func run(dock: Node, out_dir: String) -> void:
 		await _tree.process_frame
 
 	plugin.hide_bottom_panel()
+	if OS.get_environment("SUBSTANCE_BRIDGE_TOUR_ONLY") == "projection":
+		await _projection_tour()
+		print("[tour] done: ", _out)
+		_tree.quit(0)
+		return
 	var library := OS.get_environment("SUBSTANCE_BRIDGE_TOUR_LIBRARY")
 	if not library.is_empty():
 		await _library_tour(library)
@@ -233,6 +238,89 @@ func run(dock: Node, out_dir: String) -> void:
 
 	print("[tour] done: ", _out)
 	_tree.quit(0)
+
+
+## Projection shots only (SUBSTANCE_BRIDGE_TOUR_ONLY=projection): the rock with auto-generated
+## UVs (Godot's unwrapper), tarmac through those UVs on the left and triplanar on the right.
+func _projection_tour() -> void:
+	EditorInterface.open_scene_from_path(SCENE)
+	await _settle(1.0)
+	EditorInterface.set_main_screen_editor("3D")
+	var root := EditorInterface.get_edited_scene_root()
+	var rock: MeshInstance3D = root.get_node("Rock")
+	var mesh := _auto_uv_mesh(rock.mesh)
+	var scale := rock.scale * float(OS.get_environment("TOUR_PROJ_SCALE") if OS.has_environment("TOUR_PROJ_SCALE") else "8")
+	var spread := float(OS.get_environment("TOUR_PROJ_SPREAD") if OS.has_environment("TOUR_PROJ_SPREAD") else "0.6")
+	var width := mesh.get_aabb().size.x * scale.x
+	var pair: Array[MeshInstance3D] = []
+	for side in [-1, 1]:
+		var mi := MeshInstance3D.new()
+		mi.name = "AutoUV_%s" % ("UV" if side < 0 else "Triplanar")
+		mi.mesh = mesh
+		mi.scale = scale
+		mi.rotation = rock.rotation
+		mi.position = Vector3(side * width * spread, 0, 0)
+		root.add_child(mi)
+		mi.owner = root
+		pair.append(mi)
+	rock.visible = false
+	for n in ["Camera3D"]:
+		if root.has_node(n):
+			(root.get_node(n) as Node3D).visible = false
+	_focus_tab(_dock)
+	await _dock.create_material(TARMAC, [pair[0]] as Array[MeshInstance3D])
+	var gs: GraphSettings = await _dock.create_material(TARMAC, [pair[1]] as Array[MeshInstance3D])
+	gs.projection = 2
+	await _idle()
+	await _dock.bake_from_mesh(pair[1])
+	await _idle()
+	gs.fit_projection_to_mesh()
+	gs.projection_tile_size = snappedf(gs.projection_tile_size * 0.6, 0.001)
+	await _idle()
+	await _settle(2.0)
+	await _view_shot("30_view_projection")
+	_focus_tab(EditorInterface.get_inspector())
+	EditorInterface.edit_resource(gs)
+	await _settle(1.0)
+	await _group_shot("31_inspector_projection", &"projection")
+
+
+## The mesh with UVs from Godot's lightmap unwrapper moved into UV0 (scattered islands, like
+## many auto-generated UVs), with tangents rebuilt for them.
+static func _auto_uv_mesh(source: Mesh) -> ArrayMesh:
+	var am := ArrayMesh.new()
+	for i in source.get_surface_count():
+		var arrays := source.surface_get_arrays(i)
+		arrays[Mesh.ARRAY_TANGENT] = null
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	am.lightmap_unwrap(Transform3D.IDENTITY, 0.02)
+	var out := ArrayMesh.new()
+	for i in am.get_surface_count():
+		var arrays := am.surface_get_arrays(i)
+		arrays[Mesh.ARRAY_TEX_UV] = arrays[Mesh.ARRAY_TEX_UV2]
+		arrays[Mesh.ARRAY_TEX_UV2] = null
+		arrays[Mesh.ARRAY_TANGENT] = null
+		var st := SurfaceTool.new()
+		st.create_from_arrays(arrays, Mesh.PRIMITIVE_TRIANGLES)
+		st.generate_tangents()
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, st.commit_to_arrays())
+	return out
+
+
+## An Inspector shot scrolled to the property `first`, with sections unfolded.
+func _group_shot(name: String, first: StringName) -> void:
+	var inspector := EditorInterface.get_inspector()
+	for section in inspector.find_children("*", "EditorInspectorSection", true, false):
+		section.call("unfold")
+	await _settle(0.6)
+	for prop in inspector.find_children("*", "EditorProperty", true, false):
+		if (prop as EditorProperty).get_edited_property() == first:
+			var y := (prop as Control).global_position.y - inspector.global_position.y + inspector.scroll_vertical
+			inspector.scroll_vertical = int(y - 120)
+			break
+	await _settle(0.5)
+	_shot(name, inspector)
+	inspector.scroll_vertical = 0
 
 
 ## Library shots only (SUBSTANCE_BRIDGE_TOUR_LIBRARY=<folder>): the Substance tab with a

@@ -45,6 +45,11 @@ In the Substance Bridge dock (top-right, beside the Inspector):
 - The **Substance Preview** bottom panel shows every output in 2D (tile, channel, zoom).
 - The Inspector's **Material Slots** group routes outputs to material slots: source (Auto, None or
   any output), strength, invert and a min/max remap, baked per slot.
+- **Tiling** (Inspector): UV scale and offset, set on the material with no re-render.
+- **Projection** (Inspector): planar, triplanar, cylindrical or spherical, baked into the mesh's
+  own UVs (good for auto-generated UVs) after **Bake from Selected Mesh**. Axis, tile size,
+  repeats, sharpness, offset, rotation, Fit to Mesh; normal maps are re-oriented to the mesh's
+  tangent space. Live edits are projected too (about 0.1-0.3 s for all maps on the GPU).
 - **Render Final**, **Make Seed Variants** (one per selected mesh), **Render All** (every material,
   any size, optional re-bake).
 
@@ -78,6 +83,10 @@ The editor self-test (`tests/selftest.gd`) drives the dock end to end. Set
 (a mesh-adaptive `.sbsar`) and `SUBSTANCE_BRIDGE_SELFTEST_NOISE` (e.g. `grunge_014`), then run the
 editor with `--log-file <temp>/selftest.log`. Run it windowed to catch editor-UI errors and for the
 Noise Lab part (headless has no GPU), ideally on a copy of the project.
+
+The projection test (`tests/projection_test.gd`) runs the same way with
+`SUBSTANCE_BRIDGE_PROJECTION` set to `tarmac.sbsar`: plane identity for colour and normal maps,
+every projection on a box and a sphere, then the dock flow and tiling (it removes its material).
 
 The library test (`tests/library_test.gd`) runs the same way with `SUBSTANCE_BRIDGE_LIBRARY` set to
 a scratch folder of `.sbsar` files in subfolders, including `tarmac.sbsar` and a mesh-driven

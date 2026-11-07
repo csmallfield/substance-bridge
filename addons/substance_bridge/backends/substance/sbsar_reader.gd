@@ -16,6 +16,9 @@ const TYPE_NAMES := {
 	8: "int2", 9: "int3", 10: "int4",
 }
 
+## Graph attributes kept in GraphDescription.meta when present.
+const META_KEYS := ["category", "author", "authorurl", "keywords", "description", "physicalSize", "primaryinput"]
+
 
 ## Extracts the XML (cached). Returns {"path": String} or {"error": String}.
 static func extract_xml(sbsar: String, seven_zip: String, cache_root: String) -> Dictionary:
@@ -51,6 +54,7 @@ static func _first_xml(dir: String) -> String:
 ## Parses one graph (the first, or the one whose pkgurl matches graph_url).
 static func parse(xml_path: String, graph_url: String = "") -> GraphDescription:
 	var d := GraphDescription.new()
+	d.graph_count = 0
 	var p := XMLParser.new()
 	var err := p.open(xml_path)
 	if err != OK:
@@ -72,11 +76,15 @@ static func parse(xml_path: String, graph_url: String = "") -> GraphDescription:
 
 			if tag == "graph":
 				var url: String = a.get("pkgurl", "")
+				d.graph_count += 1
 				in_graph = not found and (graph_url.is_empty() or url == graph_url)
 				if in_graph:
 					found = true
 					d.graph_url = url
 					d.label = a.get("label", url.trim_prefix("pkg://"))
+					for k in META_KEYS:
+						if not String(a.get(k, "")).is_empty():
+							d.meta[k] = a[k]
 			elif not in_graph:
 				pass
 			elif tag == "sbspreset":

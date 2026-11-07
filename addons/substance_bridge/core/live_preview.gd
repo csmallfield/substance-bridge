@@ -72,18 +72,24 @@ func _render_once(gs: GraphSettings) -> void:
 	if not out["errors"].is_empty() or mat == null:
 		updated.emit(gs, Time.get_ticks_msec() - started, "; ".join(out["errors"]) if mat else "no material")
 		return
-	var plan := Routing.plan(gs.routes, out["outputs"])
+	apply_outputs(mat, gs.routes, out["outputs"], gs.output_name)
+	updated.emit(gs, Time.get_ticks_msec() - started, "")
+	outputs_ready.emit(gs, out["outputs"])
+
+
+## Puts rendered outputs ([{id, label, usages, image}]) into mat's slots, following routes.
+## Slots that nothing feeds any more are cleared when the bridge made their texture.
+static func apply_outputs(mat: StandardMaterial3D, routes: Dictionary, outputs: Array, output_name: String) -> void:
+	var plan := Routing.plan(routes, outputs)
 	for s in Routing.SLOTS:
 		var slot: String = s["id"]
-		if String(gs.routes.get(slot, {}).get("source", "")) == "-":
+		if String(routes.get(slot, {}).get("source", "")) == "-":
 			Routing.clear_slot(mat, slot)
 		elif plan.has(slot):
 			apply(mat, slot, Routing.transform(plan[slot]["output"]["image"], plan[slot], slot))
-			Routing.apply_settings(mat, slot, gs.routes, plan[slot])
-		elif Routing.is_generated(Routing.slot_texture(mat, slot), slot, mat.resource_path.get_base_dir(), gs.output_name):
+			Routing.apply_settings(mat, slot, routes, plan[slot])
+		elif Routing.is_generated(Routing.slot_texture(mat, slot), slot, mat.resource_path.get_base_dir(), output_name):
 			Routing.clear_slot(mat, slot)
-	updated.emit(gs, Time.get_ticks_msec() - started, "")
-	outputs_ready.emit(gs, out["outputs"])
 
 
 ## {"images": {usage: Image}, "outputs": [...], "errors": PackedStringArray}
@@ -104,10 +110,13 @@ func _render_in_memory(gs: GraphSettings, backend: RefCounted) -> Dictionary:
 	return {"images": images, "outputs": outputs, "errors": res["errors"]}
 
 
-func _render_files(gs: GraphSettings, config: Dictionary) -> Dictionary:
+## Renders gs to PNGs (render_maps) and loads them: {"images", "outputs", "errors"} as above.
+## Also used by the library (other sizes and folders).
+func _render_files(gs: GraphSettings, config: Dictionary, size_log2 := LIVE_SIZE_LOG2, dir := "") -> Dictionary:
 	config["engine"] = LIVE_ENGINE
-	var dir := String(config["cache_dir"]).path_join("live").path_join(gs.output_name)
-	var result: RenderResult = await pipeline.render_maps(gs, LIVE_SIZE_LOG2, config, dir, false, true)
+	if dir.is_empty():
+		dir = String(config["cache_dir"]).path_join("live").path_join(gs.output_name)
+	var result: RenderResult = await pipeline.render_maps(gs, size_log2, config, dir, false, true)
 	var out := {"images": {}, "outputs": [], "errors": result.errors}
 	if not result.is_ok():
 		return out

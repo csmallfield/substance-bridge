@@ -135,8 +135,12 @@ func _read_report(stdout: String, res: RenderResult) -> void:
 			for u: String in usages:
 				if not res.maps.has(u):
 					res.maps[u] = path
-	if res.maps.is_empty() and res.errors.is_empty():
-		res.errors.append("The graph has no outputs with a usage (baseColor, normal, ...)")
+	if res.outputs.is_empty() and res.errors.is_empty():
+		res.errors.append("The graph has no outputs")
+	elif res.maps.is_empty() and res.errors.is_empty():
+		# A mask generator, say: Auto puts its first output into Albedo (routing.gd);
+		# Material Slots can route it anywhere.
+		res.warnings.append("No output declares a usage (baseColor, normal, ...); the first goes into Albedo")
 
 
 ## Asks the graph for the wanted normal convention when it exposes a switch

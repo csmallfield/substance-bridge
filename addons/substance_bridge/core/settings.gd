@@ -11,6 +11,9 @@ const SBSBAKER := "substance_bridge/tools/sbsbaker_path"
 const SEVEN_ZIP := "substance_bridge/tools/7zip_path"
 const ENGINE := "substance_bridge/render/engine"
 const OUTPUT_FOLDER := "substance_bridge/output_folder"
+## Folders of .sbsar files outside the project, shown in the Substance Library tab. Per user
+## (Editor Settings), so every project sees the same library.
+const LIBRARY_PATHS := "substance_bridge/library/folders"
 
 const DEFAULT_OUTPUT_FOLDER := "res://substance_bridge"
 
@@ -34,6 +37,15 @@ static func register() -> void:
 	for key: String in TOOL_DEFAULTS:
 		_add_editor_setting(es, key, TOOL_DEFAULTS[key], PROPERTY_HINT_GLOBAL_FILE, "*.exe")
 	_add_editor_setting(es, ENGINE, "d3d11pc", PROPERTY_HINT_ENUM_SUGGESTION, "d3d11pc,sse2")
+	if not es.has_setting(LIBRARY_PATHS):
+		es.set_setting(LIBRARY_PATHS, PackedStringArray())
+	es.set_initial_value(LIBRARY_PATHS, PackedStringArray(), false)
+	es.add_property_info({
+		"name": LIBRARY_PATHS,
+		"type": TYPE_PACKED_STRING_ARRAY,
+		"hint": PROPERTY_HINT_TYPE_STRING,
+		"hint_string": "%d/%d:" % [TYPE_STRING, PROPERTY_HINT_GLOBAL_DIR],
+	})
 
 	if not ProjectSettings.has_setting(OUTPUT_FOLDER):
 		ProjectSettings.set_setting(OUTPUT_FOLDER, DEFAULT_OUTPUT_FOLDER)
@@ -68,6 +80,14 @@ static func snapshot() -> Dictionary:
 		"output_folder": String(ProjectSettings.get_setting(OUTPUT_FOLDER, DEFAULT_OUTPUT_FOLDER)),
 		"cache_dir": ProjectSettings.globalize_path("user://substance_bridge"),
 	}
+
+
+static func library_folders() -> PackedStringArray:
+	return PackedStringArray(EditorInterface.get_editor_settings().get_setting(LIBRARY_PATHS))
+
+
+static func set_library_folders(folders: PackedStringArray) -> void:
+	EditorInterface.get_editor_settings().set_setting(LIBRARY_PATHS, folders)
 
 
 ## Returns one message per configured tool path that does not point at a file.

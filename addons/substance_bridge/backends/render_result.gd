@@ -17,5 +17,6 @@ var commands := PackedStringArray()
 var duration_ms := 0
 
 
+## No errors and something was written (a mask generator has outputs but no usages).
 func is_ok() -> bool:
-	return errors.is_empty() and not maps.is_empty()
+	return errors.is_empty() and not (maps.is_empty() and outputs.is_empty())

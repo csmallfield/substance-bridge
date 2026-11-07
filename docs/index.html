@@ -17,6 +17,7 @@
     <li><a href="#overview">Overview</a></li>
     <li><a href="#setup">Setup</a></li>
     <li><a href="#quick-start">Quick start</a></li>
+    <li><a href="#library">Substance library</a></li>
     <li><a href="#inspector">The generated Inspector</a></li>
     <li class="sub"><a href="#visibility">Visibility rules</a></li>
     <li class="sub"><a href="#presets">Presets and revert</a></li>
@@ -69,6 +70,7 @@
   <div class="card"><h3>Mesh-fitted materials</h3><p>Mesh-adaptive graphs get AO, curvature, position and world normal baked from the selected mesh.</p></div>
   <div class="card"><h3>Variants and batch</h3><p>Many seeds from one graph, one per mesh; re-render every material at any size.</p></div>
   <div class="card"><h3>Native baker</h3><p>Bake mesh maps inside Godot, with no Substance tools, close to <code>sbsbaker</code>'s results.</p></div>
+  <div class="card"><h3>Substance library</h3><p>Browse your <code>.sbsar</code> folders as sphere thumbnails, with an orbitable preview and each graph's inputs, parameters and outputs.</p></div>
   <div class="card"><h3>Noise Lab backend</h3><p>Grunge Maps and standalone noises rebuilt in Godot, with the same Inspector and previews.</p></div>
 </div>
 
@@ -117,7 +119,7 @@
 
 <ol class="steps">
   <li><strong>Select one or more <code>MeshInstance3D</code> nodes</strong> in your scene. They need clean, non-overlapping UVs (UV0).</li>
-  <li><strong>Choose a source</strong> in the dock: <em>Substance (.sbsar)</em> plus a file (type a path or click <kbd>...</kbd>), or <em>Noise Lab (native)</em> plus a noise.</li>
+  <li><strong>Choose a source</strong> in the dock: <em>Substance (.sbsar)</em> plus a file (type a path, click <kbd>...</kbd>, or pick one from your <a href="#library">library</a> with <kbd>Library</kbd>), or <em>Noise Lab (native)</em> plus a noise.</li>
   <li><strong>Click Create and Apply to Selected.</strong> The bridge makes a settings resource, renders a 512 px preview, builds a material and puts it in each selected mesh's <em>Material Override</em> (one undoable action).</li>
   <li><strong>Edit the parameters</strong> in the Inspector, which opens on the new material's settings. The preview re-renders shortly after each change.</li>
   <li><strong>Click Render Final</strong> to render the same settings at full size (2K by default).</li>
@@ -138,6 +140,48 @@
   <p>Any later change to the same material updates its textures and <code>.tres</code> in place, so every mesh and scene that uses it picks up the change.</p>
 </div>
 
+<!-- ============================================================ -->
+<h2 id="library">Substance library</h2>
+
+<p>The <strong>Substance</strong> tab at the top of the editor, next to 2D, 3D, Script and AssetLib, is a library of the <code>.sbsar</code> files you keep outside your projects. Files stay where they are: a material made from the library references the <code>.sbsar</code> in place, so only the rendered maps it produces end up in the project.</p>
+
+<figure>
+  <img src="images/26_library.webp" width="1920" height="1080" alt="The Substance tab: a grid of sphere thumbnails on the left, a large preview of Rusted Painted Metal and its details on the right">
+  <figcaption>The library: thumbnails on the left; the selected file's preview and details on the right.</figcaption>
+</figure>
+
+<ol class="steps">
+  <li><strong>Add a folder.</strong> Use <kbd>Folders</kbd> &gt; <em>Add Folder...</em>. Folders are scanned with their subfolders, and each subfolder becomes a category. They're saved in Editor Settings, so every project sees the same library. Click a folder in the same menu to remove it.</li>
+  <li><strong>Browse.</strong> Each file gets a sphere thumbnail, rendered once in the background. Search matches the file name, folder, and the graph's own category and keywords; the dropdown filters by folder.</li>
+  <li><strong>Select a file</strong> for a large preview at 512 px. Drag to orbit, use the wheel to zoom, double-click to reset; switch between sphere, cube and plane.</li>
+  <li><strong>Use for New Material</strong> (or double-click a tile) puts the file's path in the dock and returns to the 3D view. Select your meshes and click <strong>Create and Apply to Selected</strong> as usual.</li>
+</ol>
+
+<div class="side">
+  <figure>
+    <img src="images/27_library_mesh.webp" width="484" height="858" alt="Library details for PL_ISF_Gen_Edging01: preview sphere, mesh inputs, parameters and outputs">
+    <figcaption>A mesh-driven edge generator. Its mesh maps are baked from the preview sphere, which has no edges, so it looks plain here; the panel lists what it will bake from your mesh, where the edges show.</figcaption>
+  </figure>
+  <figure>
+    <img class="ui" src="images/29_dock_library.webp" width="413" height="955" alt="The dock with a library file in the New material field">
+    <figcaption>After <em>Use</em>: the file is in the dock, ready for Create.</figcaption>
+  </figure>
+</div>
+
+<h3>What the details show</h3>
+<ul>
+  <li><strong>Graph metadata</strong> when the file has it: label, category, author (linked), physical size, keywords and description.</li>
+  <li><strong>Mesh inputs</strong>: whether the graph is driven by the mesh, and which maps (AO, curvature, ...) the bridge will bake for it. Tiling materials say they don't need the mesh.</li>
+  <li><strong>Parameters</strong> by group, with their kind, range and default; and the graph's <strong>presets</strong>.</li>
+  <li><strong>Outputs</strong> with their usages, which decide the <a href="#slots">material slots</a> they feed.</li>
+</ul>
+
+<h3>Thumbnails</h3>
+<p>Thumbnails are cached in a <code>.thumbnails</code> folder inside each library folder, named after the file plus a short hash of its path, size and modification time. Rescanning reuses them, editing an <code>.sbsar</code> re-renders only its thumbnail, and thumbnails of removed or changed files are deleted. A folder you can't write to (under Program Files, say) keeps its thumbnails in the editor cache instead. Each one takes under a second (maps at 256 with the CPU engine, then one frame of the sphere), so a first scan of a few hundred files runs for a few minutes in the background while the grid fills in.</p>
+
+<div class="callout">
+  <p>Graphs whose outputs declare no usage, such as mask generators, show their first output as the albedo, here and in materials you create from them. Use <a href="#slots">Material slots</a> to send it elsewhere. A file that can't be rendered at all keeps an empty tile; hover it to see why.</p>
+</div>
 <!-- ============================================================ -->
 <h2 id="inspector">The generated Inspector</h2>
 
@@ -467,7 +511,10 @@ user://substance_bridge/           per-machine cache
   xml/      metadata extracted from .sbsar files
   renders/  raw tool output before import
   meshes/   meshes exported for baking (.obj, plus .res for the native baker)
-  bakes/    mesh maps, per mesh, size and baker</code></pre>
+  bakes/    mesh maps, per mesh, size and baker
+  library/  library preview and thumbnail maps
+
+&lt;your library folder&gt;/.thumbnails/   library thumbnails (one PNG per file)</code></pre>
 
 <p>The settings files are the source of truth: everything else is regenerated from them. In this project's git setup the <code>_graph.tres</code> files are tracked and the textures and materials are ignored. After a fresh clone, run <strong>Render All</strong> to rebuild them. Mesh-adaptive materials also need <strong>Bake from Selected Mesh</strong> once, because the baked meshes live in the per-machine cache.</p>
 
@@ -482,6 +529,7 @@ user://substance_bridge/           per-machine cache
     <tr><td><code>substance_bridge/tools/sbsbaker_path</code></td><td>Automation Toolkit's <code>sbsbaker.exe</code></td></tr>
     <tr><td><code>substance_bridge/tools/7zip_path</code></td><td><code>C:/Program Files/7-Zip/7z.exe</code></td></tr>
     <tr><td><code>substance_bridge/render/engine</code></td><td><code>d3d11pc</code> (GPU); <code>sse2</code> is the CPU engine</td></tr>
+    <tr><td><code>substance_bridge/library/folders</code></td><td>Empty; the <a href="#library">library</a> folders, edited from the Substance tab</td></tr>
   </tbody>
 </table>
 
@@ -520,6 +568,7 @@ user://substance_bridge/           per-machine cache
     <tr><td>"The noise lab is not linked into this project"</td><td>Create the <code>noiselab</code> junction (see <a href="#setup">Setup</a>).</td></tr>
     <tr><td>Render failed with an image-input warning</td><td>A baked map or image file couldn't be loaded. <code>sbsrender</code> exits 0 in that case, so the bridge reads its warnings and reports the failure for you.</td></tr>
     <tr><td>The dock stops updating after you edit the plugin's scripts</td><td>Godot reloaded the scripts in place. Untick and re-tick the plugin, or restart the editor.</td></tr>
+    <tr><td>A library tile has no thumbnail</td><td>Hover the tile: its tooltip says why the render failed. <kbd>Rescan</kbd> retries files that have changed since.</td></tr>
     <tr><td>Mesh maps look wrong or blotchy</td><td>Check the mesh's UVs: they must be clean, non-overlapping and inside 0–1.</td></tr>
   </tbody>
 </table>
@@ -536,7 +585,7 @@ godot --headless --path . --script res://addons/substance_bridge/tests/obj_check
 godot --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
 godot --headless --path . --script res://addons/substance_bridge/tests/routing_check.gd
 godot --path . --script res://addons/substance_bridge/tests/native_bake_check.gd</code></pre>
-<p>The editor self-test drives the dock end to end: create, Inspector, previews, variants, batch, mesh-adaptive baking with both bakers, and the Noise Lab. Set <code>SUBSTANCE_BRIDGE_SELFTEST</code> to <code>tarmac.sbsar</code>, optionally <code>SUBSTANCE_BRIDGE_SELFTEST_MESH</code> and <code>SUBSTANCE_BRIDGE_SELFTEST_NOISE</code>, then run the editor with <code>--log-file</code>. Run it windowed on a copy of the project. The screenshots on this page come from <code>tests/tour.gd</code>, run the same way with <code>SUBSTANCE_BRIDGE_TOUR</code> set to an output folder.</p>
+<p>The editor self-test drives the dock end to end: create, Inspector, previews, variants, batch, mesh-adaptive baking with both bakers, and the Noise Lab. Set <code>SUBSTANCE_BRIDGE_SELFTEST</code> to <code>tarmac.sbsar</code>, optionally <code>SUBSTANCE_BRIDGE_SELFTEST_MESH</code> and <code>SUBSTANCE_BRIDGE_SELFTEST_NOISE</code>, then run the editor with <code>--log-file</code>. Run it windowed on a copy of the project. The library has its own editor test, <code>tests/library_test.gd</code>: set <code>SUBSTANCE_BRIDGE_LIBRARY</code> to a scratch folder of <code>.sbsar</code> files (with subfolders, including <code>tarmac.sbsar</code> and a mesh-driven graph) and run the editor. It points the library at that folder for the run and restores your folders afterwards. The screenshots on this page come from <code>tests/tour.gd</code>, run the same way with <code>SUBSTANCE_BRIDGE_TOUR</code> set to an output folder (add <code>SUBSTANCE_BRIDGE_TOUR_LIBRARY</code> for the library shots only).</p>
 
 <footer>
   <p>Substance Bridge is a private project. Substance, Substance Designer and the Substance Automation Toolkit are Adobe products; this plugin only calls their command-line tools. Screenshots: Godot 4.7, RTX 3080, November 2026.</p>

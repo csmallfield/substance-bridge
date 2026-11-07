@@ -28,6 +28,11 @@ var label := ""
 var params: Array[Dictionary] = []
 var outputs: Array[Dictionary] = []
 var presets: Array[Dictionary] = []
+## Graph metadata when the backend has it (Substance: category, author, authorurl, keywords,
+## description, physicalSize, primaryinput).
+var meta := {}
+## Graphs in the source; the bridge uses the first (graph_url).
+var graph_count := 1
 var errors := PackedStringArray()
 
 

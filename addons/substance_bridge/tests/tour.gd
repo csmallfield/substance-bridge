@@ -38,6 +38,12 @@ func run(dock: Node, out_dir: String) -> void:
 		await _tree.process_frame
 
 	plugin.hide_bottom_panel()
+	var library := OS.get_environment("SUBSTANCE_BRIDGE_TOUR_LIBRARY")
+	if not library.is_empty():
+		await _library_tour(library)
+		print("[tour] done: ", _out)
+		_tree.quit(0)
+		return
 	EditorInterface.open_scene_from_path(SCENE)
 	await _settle(1.0)
 	EditorInterface.set_main_screen_editor("3D")
@@ -227,6 +233,57 @@ func run(dock: Node, out_dir: String) -> void:
 
 	print("[tour] done: ", _out)
 	_tree.quit(0)
+
+
+## Library shots only (SUBSTANCE_BRIDGE_TOUR_LIBRARY=<folder>): the Substance tab with a
+## tiling material and a mesh-driven one selected, and the dock after "Use". The library
+## folders setting is restored afterwards.
+func _library_tour(folder: String) -> void:
+	const Settings := preload("res://addons/substance_bridge/core/settings.gd")
+	var saved := Settings.library_folders()
+	Settings.set_library_folders(PackedStringArray([folder]))
+	EditorInterface.open_scene_from_path(SCENE)
+	await _settle(1.0)
+	var screen: Node = plugin._library
+	EditorInterface.set_main_screen_editor(plugin.SCREEN_NAME)
+	await _settle(0.5)
+	if screen.is_generating():
+		await screen.thumbnails_done
+	var pick := {}
+	var mesh := {}
+	for e in screen.entries():
+		if String(e["name"]) == "rusted_painted_metal":
+			pick = e
+		if String(e["name"]).contains("Edging01"):
+			mesh = e
+	EditorInterface.distraction_free_mode = true  # the docks hide: the tab gets the window
+	screen.select(pick)
+	await screen.preview_done
+	screen.preview_stage().orbit(Vector2(-60, -25))
+	await _settle(1.0)
+	_shot("26_library", null)
+	EditorInterface.distraction_free_mode = false
+	await _settle(0.5)
+
+	screen.select(mesh)
+	await screen.preview_done
+	screen._shape.select(0)
+	screen.preview_stage().orbit(Vector2(90, 0))
+	await _settle(1.0)
+	_shot("27_library_mesh", screen._body.get_child(1))
+
+	screen._search.text = "metal"
+	screen._apply_filter()
+	await _settle(0.5)
+	_shot("28_library_search", screen._grid_scroll)
+	screen._search.text = ""
+	screen._apply_filter()
+
+	screen.use_requested.emit(pick["path"])
+	_focus_tab(_dock)
+	await _settle(1.0)
+	_shot("29_dock_library", _dock)
+	Settings.set_library_folders(saved)
 
 
 # --- helpers ----------------------------------------------------------------------------------

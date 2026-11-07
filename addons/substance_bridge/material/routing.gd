@@ -4,7 +4,8 @@ extends RefCounted
 ##
 ## A GraphSettings stores routes as {slot: {source?, strength?, invert?, range?}}, only the
 ## keys changed from their defaults:
-##   source    ""  (Auto: the output whose usage matches the slot), "-" (None: slot off),
+##   source    ""  (Auto: the output whose usage matches the slot; Albedo takes the first
+##             output when none declares a usage), "-" (None: slot off),
 ##             or an output id. One output can feed several slots.
 ##   strength  the slot's own scalar (see SLOTS), always set on the material (default if unset).
 ##   invert    bool, baked into the slot's texture.
@@ -77,11 +78,18 @@ static func plan(routes: Dictionary, outputs: Array) -> Dictionary:
 	return result
 
 
+## The output whose usage matches the slot. When no output declares any usage (mask
+## generators), Albedo gets the first output so the graph still shows something.
 static func _auto_output(slot: String, outputs: Array) -> Dictionary:
 	for usage in ([slot, "diffuse"] if slot == "baseColor" else [slot]):
 		for o: Dictionary in outputs:
 			if usage in Array(o.get("usages", [])):
 				return o
+	if slot == "baseColor" and not outputs.is_empty():
+		for o: Dictionary in outputs:
+			if not Array(o.get("usages", [])).is_empty():
+				return {}
+		return outputs[0]
 	return {}
 
 

@@ -30,6 +30,8 @@ enum Job { NONE, PREVIEW, FINAL }
 signal current_changed(gs: GraphSettings)
 ## A preview or final render of gs finished and its imported maps are on the material.
 signal rendered(gs: GraphSettings)
+## The Library button was pressed (the plugin opens the Substance main screen).
+signal library_requested
 
 ## Batch sizes: label, size_log2 (or a mode: -1 = each material's final size, -2 = its preview size).
 const SIZE_FINAL := -1
@@ -96,8 +98,13 @@ func _init() -> void:
 	browse.text = "..."
 	browse.tooltip_text = "Choose an .sbsar file"
 	browse.pressed.connect(_on_browse)
+	var library := Button.new()
+	library.text = "Library"
+	library.tooltip_text = "Pick an .sbsar from your library (the Substance tab at the top)."
+	library.pressed.connect(func() -> void: library_requested.emit())
 	src_row.add_child(_sbsar_edit)
 	src_row.add_child(browse)
+	src_row.add_child(library)
 	add_child(src_row)
 	_create_button = Button.new()
 	_create_button.text = "Create and Apply to Selected"
@@ -244,6 +251,14 @@ func _chosen_source() -> String:
 			return ""
 		return NoiseLabBackend.SCHEME + _noise_option.get_item_text(_noise_option.selected)
 	return _sbsar_edit.text.strip_edges()
+
+
+## Puts a library file in the New material field (it stays where it is; nothing is copied).
+func use_library_file(path: String) -> void:
+	_source_kind.select(0)
+	_refresh_source_rows()
+	_sbsar_edit.text = path
+	set_status("From the library: %s. Select meshes, then Create and Apply." % path.get_file())
 
 
 func set_status(text: String) -> void:

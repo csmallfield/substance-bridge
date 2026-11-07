@@ -48,6 +48,14 @@ In the Substance Bridge dock (top-right, beside the Inspector):
 - **Render Final**, **Make Seed Variants** (one per selected mesh), **Render All** (every material,
   any size, optional re-bake).
 
+The **Substance** main-screen tab (next to 3D, Script, AssetLib) is a library of `.sbsar` folders
+outside the project (Folders > Add Folder; stored in Editor Settings, shared by every project).
+Sphere thumbnails are cached in each folder's `.thumbnails` (or the editor cache for read-only
+folders) and re-rendered only for edited files. Selecting a file shows an orbitable 512 preview
+(sphere, cube, plane) with its metadata, mesh inputs, parameters and outputs; **Use for New
+Material** or the dock's **Library** button puts its path in the dock. Files are referenced in
+place, never copied.
+
 Generated textures and materials go to `res://substance_bridge/<name>/` and are git-ignored; the
 `<name>_graph.tres` settings next to them are tracked, because everything else is regenerated
 from them.
@@ -70,3 +78,7 @@ The editor self-test (`tests/selftest.gd`) drives the dock end to end. Set
 (a mesh-adaptive `.sbsar`) and `SUBSTANCE_BRIDGE_SELFTEST_NOISE` (e.g. `grunge_014`), then run the
 editor with `--log-file <temp>/selftest.log`. Run it windowed to catch editor-UI errors and for the
 Noise Lab part (headless has no GPU), ideally on a copy of the project.
+
+The library test (`tests/library_test.gd`) runs the same way with `SUBSTANCE_BRIDGE_LIBRARY` set to
+a scratch folder of `.sbsar` files in subfolders, including `tarmac.sbsar` and a mesh-driven
+graph. It points the library at that folder for the run and restores your folders afterwards.

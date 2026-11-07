@@ -18,6 +18,10 @@ func _initialize() -> void:
 	_expect(p.keys() == ["baseColor", "roughness"] and p["baseColor"]["output"]["id"] == "basecolor"
 			and not p["baseColor"]["bake"] and not p["roughness"]["explicit"], "no routes: usages only, nothing baked")
 	_expect(Routing.plan({}, [outputs[0]]).get("baseColor", {}).get("output", {}).get("id") == "diffuse", "albedo falls back to diffuse")
+	var masks := [{"id": "mask_a", "usages": [], "path": "a.png"}, {"id": "mask_b", "usages": [], "path": "b.png"}]
+	_expect(Routing.plan({}, masks).keys() == ["baseColor"] and Routing.plan({}, masks)["baseColor"]["output"]["id"] == "mask_a",
+			"no usages at all (mask generator): albedo takes the first output")
+	_expect(not Routing.plan({}, [outputs[2], outputs[3]]).has("baseColor"), "a usage-less output is not auto-wired when others declare usages")
 
 	p = Routing.plan({"roughness": {"source": "mask", "invert": true, "range": Vector2(0.2, 0.9)},
 			"metallic": {"source": "mask"}, "baseColor": {"source": "-"}}, outputs)

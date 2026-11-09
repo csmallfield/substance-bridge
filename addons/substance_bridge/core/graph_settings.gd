@@ -18,8 +18,11 @@ const Routing := preload("res://addons/substance_bridge/material/routing.gd")
 signal parameters_changed
 ## Emitted when the graph description has loaded (its properties are now listed).
 signal description_loaded
+## Emitted when a setting changes that does not affect the preview (the final size), so the
+## dock can update its labels without re-rendering.
+signal settings_changed
 
-const SIZE_NAMES := {8: "256", 9: "512", 10: "1K", 11: "2K", 12: "4K"}
+const SIZE_NAMES := {8: "256", 9: "512", 10: "1K", 11: "2K", 12: "4K", 13: "8K"}
 
 ## Our own property names; graph parameters with these ids get a "param_" prefix.
 const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_preview",
@@ -58,7 +61,10 @@ var source := "":
 		preview_size = v
 		_params_changed()
 
-@export_enum("512:9", "1K:10", "2K:11", "4K:12") var final_size := 11
+@export_enum("512:9", "1K:10", "2K:11", "4K:12", "8K:13") var final_size := 11:
+	set(v):
+		final_size = v
+		settings_changed.emit()
 
 ## Re-render a preview automatically after each change.
 @export var auto_preview := true

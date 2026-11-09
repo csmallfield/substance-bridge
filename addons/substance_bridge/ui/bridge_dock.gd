@@ -37,7 +37,7 @@ signal library_requested
 const SIZE_FINAL := -1
 const SIZE_PREVIEW := -2
 const BATCH_SIZES := [["Each material's final size", SIZE_FINAL], ["Each material's preview size", SIZE_PREVIEW],
-		["512", 9], ["1K", 10], ["2K", 11], ["4K", 12]]
+		["512", 9], ["1K", 10], ["2K", 11], ["4K", 12], ["8K", 13]]
 
 var undo_redo: EditorUndoRedoManager
 
@@ -281,10 +281,12 @@ func set_current(gs: GraphSettings) -> void:
 	if current and current.parameters_changed.is_connected(_on_parameters_changed):
 		current.parameters_changed.disconnect(_on_parameters_changed)
 		current.description_loaded.disconnect(_refresh)
+		current.settings_changed.disconnect(_refresh)
 	current = gs
 	if current:
 		current.parameters_changed.connect(_on_parameters_changed)
 		current.description_loaded.connect(_refresh)
+		current.settings_changed.connect(_refresh)
 	_refresh()
 	current_changed.emit(current)
 

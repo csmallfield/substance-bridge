@@ -12,7 +12,28 @@ background_mode = 2
 sky = SubResource("Sky_iof4q")
 tonemap_mode = 2
 
-[node name="RockTest" type="Node3D" unique_id=274057149]
+[sub_resource type="BoxMesh" id="BoxMesh_test"]
+size = Vector3(0.16, 0.16, 0.16)
+
+[sub_resource type="SphereMesh" id="SphereMesh_test"]
+radius = 0.09
+height = 0.18
+radial_segments = 96
+rings = 48
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_test"]
+size = Vector2(0.25, 0.25)
+
+[sub_resource type="QuadMesh" id="QuadMesh_top"]
+size = Vector2(0.4, 0.2)
+
+[sub_resource type="QuadMesh" id="QuadMesh_middle"]
+size = Vector2(0.4, 0.2)
+
+[sub_resource type="QuadMesh" id="QuadMesh_bottom"]
+size = Vector2(0.4, 0.2)
+
+[node name="TestScene" type="Node3D" unique_id=274057149]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=160922409]
 environment = SubResource("Environment_p4b06")
@@ -25,6 +46,37 @@ shadow_enabled = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.060376324, 0)
 mesh = ExtResource("2_38xyi")
 
+[node name="Cube" type="MeshInstance3D" parent="." unique_id=581203377]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0.08, 0)
+mesh = SubResource("BoxMesh_test")
+
+[node name="Sphere" type="MeshInstance3D" parent="." unique_id=1427736019]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.58, 0.09, 0)
+mesh = SubResource("SphereMesh_test")
+
+[node name="Plane" type="MeshInstance3D" parent="." unique_id=903318465]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 0, 0)
+mesh = SubResource("PlaneMesh_test")
+
+[node name="LayerStack" type="Node3D" parent="." unique_id=1650228841]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.35, 0.1, 0)
+
+[node name="Layer0_Top" type="MeshInstance3D" parent="LayerStack" unique_id=318840512]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.032)
+mesh = SubResource("QuadMesh_top")
+
+[node name="Layer1_Middle" type="MeshInstance3D" parent="LayerStack" unique_id=1184469205]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.016)
+mesh = SubResource("QuadMesh_middle")
+
+[node name="Layer2_Bottom" type="MeshInstance3D" parent="LayerStack" unique_id=772054186]
+mesh = SubResource("QuadMesh_bottom")
+
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1793805315]
 transform = Transform3D(0.9438584, -0.12914555, 0.30406058, 0, 0.9204183, 0.390935, -0.33035043, -0.3689873, 0.8687445, 0.09416697, 0.1872473, 0.2687378)
 far = 2.589849
+
+[node name="OverviewCamera" type="Camera3D" parent="." unique_id=2067311458]
+transform = Transform3D(1, 0, 0, 0, 0.9515, 0.3078, 0, -0.3078, 0.9515, 0.7, 0.3, 0.68)
+current = true
+far = 20.0

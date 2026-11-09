@@ -19,7 +19,7 @@ const Routing := preload("res://addons/substance_bridge/material/routing.gd")
 
 ## Usages wired into material slots, in the order they are applied.
 const WIRED_USAGES := ["baseColor", "diffuse", "normal", "roughness", "metallic",
-		"ambientOcclusion", "emissive", "height"]
+		"ambientOcclusion", "emissive", "height", "opacity"]
 
 const IMPORT_TIMEOUT_MS := 60000
 
@@ -45,23 +45,38 @@ func build(result: RenderResult, output_folder: String, name: String, routes: Di
 			if not u in WIRED_USAGES and not u in ["diffuse"]:
 				log_lines.append("Not wired: %s" % u)
 
+	# Opacity is packed into the albedo's alpha (no texture of its own).
+	var alpha: Image = null
+	if plan.has("opacity") and plan.has("baseColor"):
+		var op_src := String(plan["opacity"]["output"].get("path", ""))
+		var op_img := Image.load_from_file(op_src) if not op_src.is_empty() else null
+		if op_img == null or op_img.is_empty():
+			log_lines.append("Could not read the opacity map %s" % op_src)
+		else:
+			alpha = Routing.transform(op_img, plan["opacity"], "opacity")
+
 	var fs := EditorInterface.get_resource_filesystem()
 	var tex_paths := {}
 	var known := PackedStringArray()  # already imported once: needs an explicit reimport
 	for slot: String in plan:
+		if slot == "opacity":
+			continue
 		var entry: Dictionary = plan[slot]
 		var src := String(entry["output"].get("path", ""))
 		if src.is_empty():
 			continue
-		var is_float := src.get_extension().to_lower() == "exr"
-		var dst := dir.path_join("%s_%s.%s" % [name, slot, src.get_extension().to_lower()])
+		var pack := slot == "baseColor" and alpha != null
+		var is_float := src.get_extension().to_lower() == "exr" and not pack
+		var dst := dir.path_join("%s_%s.%s" % [name, slot, "png" if pack else src.get_extension().to_lower()])
 		var image: Image = null
-		if entry["bake"] or (entry["explicit"] and Routing.slot_info(slot)["scalar"]):
+		if pack or entry["bake"] or (entry["explicit"] and Routing.slot_info(slot)["scalar"]):
 			image = Image.load_from_file(src)
 			if image == null or image.is_empty():
 				log_lines.append("Could not read %s" % src)
 				continue
 			image = Routing.transform(image, entry, slot)
+			if pack:
+				image = Routing.pack_alpha(image, alpha)
 		if not fs.get_file_type(dst).is_empty():
 			known.append(dst)
 		var err: Error
@@ -90,6 +105,8 @@ func build(result: RenderResult, output_folder: String, name: String, routes: Di
 	if mat == null:
 		mat = StandardMaterial3D.new()
 	for usage in WIRED_USAGES:
+		if usage == "opacity":
+			continue  # handled below: it lives in the albedo's alpha
 		if String(routes.get(usage, {}).get("source", "")) == "-":
 			Routing.clear_slot(mat, usage)
 			continue
@@ -103,6 +120,11 @@ func build(result: RenderResult, output_folder: String, name: String, routes: Di
 			continue
 		_assign(mat, usage, tex)
 		Routing.apply_settings(mat, usage, routes, plan[usage])
+	if alpha != null and tex_paths.has("baseColor"):
+		Routing.enable_alpha(mat)
+		Routing.apply_settings(mat, "opacity", routes, plan["opacity"])
+	else:
+		Routing.clear_slot(mat, "opacity")
 
 	var err := ResourceSaver.save(mat, mat_path)
 	if err != OK:
@@ -144,6 +166,8 @@ static func _assign(mat: StandardMaterial3D, usage: String, tex: Texture2D) -> v
 		"emissive":
 			mat.emission_enabled = true
 			mat.emission = Color.WHITE
+			# Multiply: the default (Add) adds the white colour to the texture, so the whole material glows white.
+			mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
 			mat.emission_texture = tex
 		"height":
 			# Wired but left off: parallax is a per-material choice (enable "Height" in the inspector).

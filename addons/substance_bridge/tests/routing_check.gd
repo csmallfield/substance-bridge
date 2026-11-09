@@ -52,6 +52,34 @@ func _initialize() -> void:
 			worst = maxf(worst, absf(img.get_pixel(x, 0).r - (c[1] + c[0] * x / 255.0)))
 		_expect(worst < 0.004 and img.get_format() == Image.FORMAT_RF, "float affine a=%.1f offset=%.1f (worst %.5f)" % [c[0], c[1], worst])
 
+	# Opacity: planned like any slot, packed into the albedo's alpha, alpha scissor on and off.
+	var with_alpha := outputs + [{"id": "opacity", "usages": ["opacity"], "path": "o.png"}]
+	p = Routing.plan({}, with_alpha)
+	_expect(p.has("opacity") and p["opacity"]["output"]["id"] == "opacity", "opacity output auto-wired to the opacity slot")
+	var col := Image.create(4, 2, false, Image.FORMAT_RGB8)
+	col.fill(Color(0.2, 0.4, 0.6))
+	var op16 := Image.create(2, 1, false, Image.FORMAT_L8)   # smaller: resized to the albedo
+	op16.set_pixel(0, 0, Color(0, 0, 0))
+	op16.set_pixel(1, 0, Color(1, 1, 1))
+	var packed := Routing.pack_alpha(col, op16)
+	_expect(packed.get_format() == Image.FORMAT_RGBA8 and packed.get_size() == col.get_size()
+			and absf(packed.get_pixel(0, 0).r - 0.2) < 0.01 and packed.get_pixel(0, 0).a < 0.3
+			and packed.get_pixel(3, 1).a > 0.7 and col.get_format() == Image.FORMAT_RGB8,
+			"pack_alpha: colour kept, opacity in alpha, inputs untouched")
+	var inv := Routing.transform(op16, Routing.plan({"opacity": {"source": "opacity", "invert": true}}, with_alpha)["opacity"], "opacity")
+	_expect(inv.get_pixel(0, 0).r > 0.99 and inv.get_pixel(1, 0).r < 0.01, "opacity invert is baked")
+	var mat := StandardMaterial3D.new()
+	Routing.enable_alpha(mat)
+	Routing.apply_settings(mat, "opacity", {"opacity": {"strength": 0.3}}, p["opacity"])
+	_expect(mat.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR and is_equal_approx(mat.alpha_scissor_threshold, 0.3),
+			"alpha scissor on, strength = threshold")
+	Routing.clear_slot(mat, "opacity")
+	var user_mat := StandardMaterial3D.new()
+	user_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	Routing.clear_slot(user_mat, "opacity")
+	_expect(mat.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED and user_mat.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA,
+			"clearing opacity undoes only the bridge's own alpha scissor")
+
 	print("ROUTING CHECK ", "PASS" if _failed == 0 else "FAIL (%d)" % _failed)
 	quit(1 if _failed else 0)
 

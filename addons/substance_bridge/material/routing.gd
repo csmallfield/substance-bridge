@@ -22,7 +22,13 @@ const SLOTS := [
 	{"id": "ambientOcclusion", "label": "Ambient Occlusion", "strength": "ao_light_affect", "default": 0.0, "max": 1.0, "scalar": true},
 	{"id": "emissive", "label": "Emission", "strength": "emission_energy_multiplier", "default": 1.0, "max": 16.0, "scalar": false},
 	{"id": "height", "label": "Height", "strength": "heightmap_scale", "default": 5.0, "max": 16.0, "scalar": true},
+	# Opacity has no texture of its own in Godot: it is packed into the albedo's alpha (pack_alpha) and turns on
+	# alpha scissor; its strength is the cut-off threshold.
+	{"id": "opacity", "label": "Opacity", "strength": "alpha_scissor_threshold", "default": 0.5, "max": 1.0, "scalar": true},
 ]
+
+## Material meta set when the bridge turned on alpha scissor, so it only ever turns off its own.
+const ALPHA_META := &"substance_bridge_alpha"
 
 const GREY_FORMATS := [Image.FORMAT_L8, Image.FORMAT_R8, Image.FORMAT_RF, Image.FORMAT_RH]
 
@@ -122,6 +128,37 @@ static func affine(img: Image, a: float, offset: float) -> void:
 	img.adjust_bcs(a / k, k, 1.0)
 
 
+## The albedo with the opacity image's luminance in its alpha (RGBA8). The opacity is resized to
+## the albedo when the sizes differ. Neither input is changed.
+static func pack_alpha(albedo: Image, opacity: Image) -> Image:
+	var rgba: Image = albedo.duplicate()
+	if rgba.is_compressed():
+		rgba.decompress()
+	if rgba.has_mipmaps():
+		rgba.clear_mipmaps()
+	rgba.convert(Image.FORMAT_RGBA8)
+	var a: Image = opacity.duplicate()
+	if a.is_compressed():
+		a.decompress()
+	if a.has_mipmaps():
+		a.clear_mipmaps()
+	a.convert(Image.FORMAT_L8)
+	if a.get_size() != rgba.get_size():
+		a.resize(rgba.get_width(), rgba.get_height(), Image.INTERPOLATE_BILINEAR)
+	var data: PackedByteArray = rgba.get_data()
+	var src: PackedByteArray = a.get_data()
+	for i in src.size():
+		data[i * 4 + 3] = src[i]
+	rgba.set_data(rgba.get_width(), rgba.get_height(), false, Image.FORMAT_RGBA8, data)
+	return rgba
+
+
+## Turns on alpha scissor for an albedo that now carries opacity in its alpha.
+static func enable_alpha(mat: StandardMaterial3D) -> void:
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.set_meta(ALPHA_META, true)
+
+
 ## Sets the slot's strength on the material (the default when the route has none), and turns
 ## on the features an explicit route asks for (height: parallax).
 static func apply_settings(mat: StandardMaterial3D, slot: String, routes: Dictionary, entry: Dictionary) -> void:
@@ -158,6 +195,10 @@ static func clear_slot(mat: StandardMaterial3D, slot: String) -> void:
 		"height":
 			mat.heightmap_enabled = false
 			mat.heightmap_texture = null
+		"opacity":
+			if mat.get_meta(ALPHA_META, false):  # only undo the alpha scissor the bridge turned on
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+				mat.remove_meta(ALPHA_META)
 
 ## True when the slot holds a texture the bridge made: a live ImageTexture, or a file named
 ## <name>_<slot>.* in the material's folder. Those are cleared when nothing feeds the slot.
@@ -178,4 +219,5 @@ static func slot_texture(mat: StandardMaterial3D, slot: String) -> Texture2D:
 		"ambientOcclusion": return mat.ao_texture
 		"emissive": return mat.emission_texture
 		"height": return mat.heightmap_texture
+		"opacity": return mat.albedo_texture if mat.get_meta(ALPHA_META, false) else null
 	return null

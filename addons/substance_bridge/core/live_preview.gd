@@ -112,12 +112,22 @@ func _project(gs: GraphSettings, out: Dictionary) -> Dictionary:
 ## Slots that nothing feeds any more are cleared when the bridge made their texture.
 static func apply_outputs(mat: StandardMaterial3D, routes: Dictionary, outputs: Array, output_name: String) -> void:
 	var plan := Routing.plan(routes, outputs)
+	# Opacity is packed into the albedo's alpha (no texture of its own).
+	var alpha: Image = null
+	if plan.has("opacity") and plan.has("baseColor"):
+		alpha = Routing.transform(plan["opacity"]["output"]["image"], plan["opacity"], "opacity")
 	for s in Routing.SLOTS:
 		var slot: String = s["id"]
 		if String(routes.get(slot, {}).get("source", "")) == "-":
 			Routing.clear_slot(mat, slot)
-		elif plan.has(slot):
-			apply(mat, slot, Routing.transform(plan[slot]["output"]["image"], plan[slot], slot))
+		elif slot == "opacity" and alpha != null:
+			Routing.enable_alpha(mat)
+			Routing.apply_settings(mat, slot, routes, plan[slot])
+		elif plan.has(slot) and slot != "opacity":
+			var img := Routing.transform(plan[slot]["output"]["image"], plan[slot], slot)
+			if slot == "baseColor" and alpha != null:
+				img = Routing.pack_alpha(img, alpha)
+			apply(mat, slot, img)
 			Routing.apply_settings(mat, slot, routes, plan[slot])
 		elif Routing.is_generated(Routing.slot_texture(mat, slot), slot, mat.resource_path.get_base_dir(), output_name):
 			Routing.clear_slot(mat, slot)

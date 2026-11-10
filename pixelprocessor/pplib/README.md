@@ -16,6 +16,7 @@ same function into Substance.
 | `shapes` | inside-positive SDFs (box, chamfered and round boxes, disc, ring, capsule, segment, convex polygon, hexagon, chamfered union); height+class stacking (`HC`, `Classes.tag`, `up`, `over`, `down`, `cut`, `paint`, `cylinder`, `comb`, `mix`, `slab`, `pocket`); hashes (`hashk`), lattices (`lat`, `wrap`), `table` lookups; layouts (`superblock_slots`, `hex_cell`) | wall panel, techno grid, hex plate |
 | `seams` | seams in seam space (u across, v along): `plain`, `running_double`, `herringbone`, `ladder`, `zigzag`, `staples`, `clip_seam`, `teeth`; parts: `v_groove`, `shoulders`, `step`, `thread` (round threads, with coverage via `take_threads()`), `hole`, `rbox`, `plate` | seam study, sewn cloth |
 | `weave` | plain or warp-faced twill weave, round warp and weft threads, plus a warp mask | sewn cloth |
+| `decals` | flat 2D icons and decal graphics as SDFs in icon space (-1..1): booleans (`union`, `inter`, `sub`, `outline`, `grow`, `gap`), anti-aliased `fill`, folds (`radial` n-fold, `polar` with a built-in atan2, `rot`, `repeat`), primitives (`circle`, `ring`, rounded `rect`, `chamfer_rect`, `polygon`, `triangle`, `star`, `sector`, `seg`, `bar`, `chevron`, `arrow_head`, `side`, `halfplane`) | decal study |
 | `curves` | `soft_ramp` (45° S-bends with rounded corners), its slope, `soft_max` / `soft_min` | concrete ribbons |
 | `npfunc` | the numpy backend (same names as `sbsfunc`), plus `sample_gray` over `SAMPLERS` | |
 

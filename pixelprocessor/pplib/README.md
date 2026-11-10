@@ -17,6 +17,7 @@ same function into Substance.
 | `seams` | seams in seam space (u across, v along): `plain`, `running_double`, `herringbone`, `ladder`, `zigzag`, `staples`, `clip_seam`, `teeth`; parts: `v_groove`, `shoulders`, `step`, `thread` (round threads, with coverage via `take_threads()`), `hole`, `rbox`, `plate` | seam study, sewn cloth |
 | `weave` | plain or warp-faced twill weave, round warp and weft threads, plus a warp mask | sewn cloth |
 | `decals` | flat 2D icons and decal graphics as SDFs in icon space (-1..1): booleans (`union`, `inter`, `sub`, `outline`, `grow`, `gap`), anti-aliased `fill`, folds (`radial` n-fold, `polar` with a built-in atan2, `rot`, `repeat`), primitives (`circle`, `ring`, rounded `rect`, `chamfer_rect`, `polygon`, `triangle`, `star`, `sector`, `seg`, `bar`, `chevron`, `arrow_head`, `side`, `halfplane`) | decal study |
+| `relief` | hard-surface bas-relief from 2D outlines (pair with `decals`): edge profiles (`hard`, `chamfer`, `rounded`, `soft`, `cove`, `dish`, `dome`), parts (`plate`, `rim`, `groove`, `inset`, `raise_to`, `set_to`), fills (`louvres`, `slats`, `waffle`, `wavy_mesh`, `holes_grid`), `min_width` against aliasing | hard-surface study |
 | `curves` | `soft_ramp` (45° S-bends with rounded corners), its slope, `soft_max` / `soft_min` | concrete ribbons |
 | `npfunc` | the numpy backend (same names as `sbsfunc`), plus `sample_gray` over `SAMPLERS` | |
 

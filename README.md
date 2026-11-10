@@ -52,6 +52,19 @@ In the Substance Bridge dock (top-right, beside the Inspector):
   tangent space. Live edits are projected too (about 0.1-0.3 s for all maps on the GPU).
 - **Render Final**, **Make Seed Variants** (one per selected mesh), **Render All** (every material,
   any size, optional re-bake).
+- **Detach Material**: copies the current material out of the bridge into `<folder>/<name>/`
+  (default `res://materials`; never overwrites, a second detach gets `<name>_2`) as a
+  ShaderMaterial with its own `.gdshader`, written for the features the material uses (tiling,
+  alpha, normal strength, AO, emission, parallax). The copy has no link to the graph, so
+  re-rendering never touches it and it can be committed. It replaces the bridge material on the
+  selected meshes that use it (with none selected: every mesh in the open scene that uses it;
+  undoable). **Pack AO/roughness/metallic into ORM** merges those maps into one
+  (R = AO, G = roughness, B = metallic) when at least two are present. **Optimize textures**
+  writes emission and ORM (or AO, roughness and metallic) at half resolution and normal maps as
+  8-bit PNGs without alpha; albedo and height are copied as they are. Either way the maps import
+  VRAM compressed, so in game this saves memory only on the halved maps; the 8-bit normal just
+  makes the source file smaller (4K normal: 79 MB to 13 MB). Detach after Render Final: it copies
+  the maps at the size they were rendered.
 
 The **Substance** main-screen tab (next to 3D, Script, AssetLib) is a library of `.sbsar` folders
 outside the project (Folders > Add Folder; stored in Editor Settings, shared by every project).
@@ -87,6 +100,11 @@ Noise Lab part (headless has no GPU), ideally on a copy of the project.
 The projection test (`tests/projection_test.gd`) runs the same way with
 `SUBSTANCE_BRIDGE_PROJECTION` set to `tarmac.sbsar`: plane identity for colour and normal maps,
 every projection on a box and a sphere, then the dock flow and tiling (it removes its material).
+
+The detach test (`tests/detach_test.gd`) runs the same way with `SUBSTANCE_BRIDGE_DETACH=1`, windowed
+so its shaders really compile: ORM packing, every shader variant, and four detaches of a fake
+material, with and without ORM and Optimize textures. Everything it writes goes under
+`res://_detach_test` and is removed afterwards.
 
 The library test (`tests/library_test.gd`) runs the same way with `SUBSTANCE_BRIDGE_LIBRARY` set to
 a scratch folder of `.sbsar` files in subfolders, including `tarmac.sbsar` and a mesh-driven

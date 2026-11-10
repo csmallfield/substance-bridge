@@ -58,6 +58,13 @@ func _enter_tree() -> void:
 		_selftest.run.call_deferred(_dock, library_test)
 		return
 
+	var detach_test := OS.get_environment("SUBSTANCE_BRIDGE_DETACH")
+	if not detach_test.is_empty():
+		_selftest = load("res://addons/substance_bridge/tests/detach_test.gd").new()
+		_selftest.plugin = self
+		_selftest.run.call_deferred(_dock, detach_test)
+		return
+
 	var opacity_test := OS.get_environment("SUBSTANCE_BRIDGE_OPACITY_TEST")
 	if not opacity_test.is_empty():
 		_selftest = load("res://addons/substance_bridge/tests/opacity_check.gd").new()

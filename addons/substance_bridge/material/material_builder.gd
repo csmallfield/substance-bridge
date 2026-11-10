@@ -205,6 +205,7 @@ func _import(paths: Array, known: PackedStringArray) -> bool:
 	fs.scan()
 	var deadline := Time.get_ticks_msec() + IMPORT_TIMEOUT_MS
 	var frames := 0
+	var rescan_at := Time.get_ticks_msec() + 1000
 	while Time.get_ticks_msec() < deadline:
 		await tree.process_frame
 		frames += 1
@@ -217,5 +218,10 @@ func _import(paths: Array, known: PackedStringArray) -> bool:
 				break
 		if all_imported:
 			return true
+		# A scan already running when ours was asked for ignores the request and can miss
+		# files written after it started: ask again.
+		if Time.get_ticks_msec() > rescan_at:
+			fs.scan()
+			rescan_at = Time.get_ticks_msec() + 1000
 	log_lines.append("Timed out waiting for the editor to import the maps")
 	return false

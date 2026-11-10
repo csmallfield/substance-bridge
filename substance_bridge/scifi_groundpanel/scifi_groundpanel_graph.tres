@@ -1,0 +1,27 @@
+[gd_resource type="Resource" format=3 uid="uid://dbixu3uruomph"]
+
+[ext_resource type="Script" uid="uid://dg8yxrahx07ay" path="res://addons/substance_bridge/core/graph_settings.gd" id="1_o6bsl"]
+
+[resource]
+script = ExtResource("1_o6bsl")
+source = "D:/06_GitHub/Godot/substance-bridge/library/scifi_groundpanel.sbsar"
+final_size = 12
+bake_size = 10
+output_name = "scifi_groundpanel"
+values = {
+"bare_metal": 1.0,
+"bay_color": Color(0.3, 0.31, 0.33, 1),
+"cavity_darkening": 0.65,
+"dark_color": Color(0.18, 0.19, 0.2, 1),
+"dirt": 0.7,
+"edge_wear": 0.8,
+"foot_traffic": 0.7,
+"grille_dust": 0.6,
+"grime": 0.7,
+"metal_roughness": 0.38,
+"plate_color": Color(0.42, 0.43, 0.45, 1),
+"rust": 1.0,
+"scratches": 0.75,
+"trim_color": Color(0.48, 0.49, 0.51, 1),
+"variation": 1
+}

@@ -5,6 +5,8 @@ extends RefCounted
 ## It points the library at that folder only (your own folders are restored at the end),
 ## checks scanning, thumbnails and their cache, the preview, the info panel and "Use".
 ## The folder should hold tarmac.sbsar and a mesh-driven graph (PL_ISF_Gen_Edging02.sbsar).
+## Add Painter smart materials (.spsm), one with Painter's preview stored (e.g.
+## PL_ISF_MetalPainted02) and one without (PL_ISF_MetalGoldish01), to check those too.
 
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const Library := preload("res://addons/substance_bridge/library/library.gd")
@@ -129,6 +131,48 @@ func run(dock: Node, folder: String) -> void:
 		_expect(info.contains("Driven by the mesh"), "info says the graph is driven by the mesh")
 		_expect(mat != null and mat.albedo_texture != null, "mesh-driven preview rendered (maps baked on the sphere)")
 		_expect(mat != null and is_equal_approx(mat.uv1_scale.x, 1.0), "mesh-driven preview uses the sphere's own UVs")
+
+	# Smart materials (.spsm), when the folder has some: one with Painter's preview, one without.
+	var with_preview := {}
+	var without_preview := {}
+	for e in screen.entries():
+		if e.get("kind") != "spsm":
+			continue
+		var doc: RefCounted = screen.renderer.spsm_for(e["path"])
+		if doc.preview_image() != null:
+			with_preview = e if with_preview.is_empty() else with_preview
+		elif without_preview.is_empty():
+			without_preview = e
+	if with_preview.is_empty() and without_preview.is_empty():
+		print("[library] no .spsm files in the folder: skipping the smart material checks")
+	for e: Dictionary in [with_preview, without_preview]:
+		if e.is_empty():
+			continue
+		_expect(FileAccess.file_exists(e["thumb"]), "%s (smart material) has a thumbnail" % e["name"])
+		screen.select(e)
+		await screen.preview_done
+		await tree.process_frame
+		var info: String = screen._info.get_parsed_text()
+		_expect(info.contains("Painter smart material") and info.contains("Layers") and info.contains("top first"),
+				"%s: info shows the layer stack" % e["name"])
+		_expect(screen._use_button.disabled, "%s: Use is disabled for a smart material" % e["name"])
+		if e == with_preview:
+			_expect(screen.is_showing_painter_preview(), "%s: shows Painter's own preview" % e["name"])
+		else:
+			var mat: StandardMaterial3D = screen.preview_material()
+			_expect(not screen.is_showing_painter_preview() and mat != null, "%s: shows a base-colour sphere" % e["name"])
+		var graphs: Array = screen.renderer.spsm_for(e["path"]).stats()["graphs"].keys()
+		if not graphs.is_empty():
+			screen._search.text = String(graphs[0])  # a graph inside, not in the file name
+			screen._apply_filter()
+			_expect(screen._tiles[e["path"]].visible, "%s: search finds it by a graph inside (%s)" % [e["name"], graphs[0]])
+		screen._search.text = ""
+		screen._apply_filter()
+	if not tarmac.is_empty():
+		screen.select(tarmac)
+		await screen.preview_done
+		_expect(not screen.is_showing_painter_preview() and not screen._use_button.disabled,
+				"back to an .sbsar: the 3D view and Use return")
 
 	# "Use" puts the path in the dock and goes back to 3D.
 	if not tarmac.is_empty():

@@ -74,6 +74,14 @@ folders) and re-rendered only for edited files. Selecting a file shows an orbita
 Material** or the dock's **Library** button puts its path in the dock. Files are referenced in
 place, never copied.
 
+Library folders can also hold Substance Painter smart materials (`.spsm`). The bridge reads them
+(`addons/substance_bridge/spsm/`) but cannot render them yet: the library shows their layer stack
+(fills, masks, filters, blends), the mesh maps their generators need and the graphs and bitmaps
+inside, with Painter's own stored preview as the thumbnail when there is one (else a sphere in the
+stack's flat base values). *Use for New Material* is disabled for them. An `.spsm` is HDF5 holding
+the layer stack (`preset.bin`, a tagged binary format), the embedded `.sbsar` graphs (they render
+with `sbsrender` as they are) and bitmaps (Qt header plus raw or LZ4 pixels).
+
 Generated textures and materials go to `res://substance_bridge/<name>/` and are git-ignored; the
 `<name>_graph.tres` settings next to them are tracked, because everything else is regenerated
 from them.
@@ -88,6 +96,7 @@ From the project folder (`<godot>` is the 4.7 console executable):
 <godot> --headless --path . --script res://addons/substance_bridge/tests/obj_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/bake_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/routing_check.gd
+<godot> --headless --path . --script res://addons/substance_bridge/tests/spsm_check.gd   (set SUBSTANCE_BRIDGE_SPSM to a folder of .spsm files for the file checks)
 <godot> --path . --script res://addons/substance_bridge/tests/native_bake_check.gd   (windowed: native baker vs sbsbaker)
 ```
 
@@ -108,4 +117,4 @@ material, with and without ORM and Optimize textures. Everything it writes goes 
 
 The library test (`tests/library_test.gd`) runs the same way with `SUBSTANCE_BRIDGE_LIBRARY` set to
 a scratch folder of `.sbsar` files in subfolders, including `tarmac.sbsar` and a mesh-driven
-graph. It points the library at that folder for the run and restores your folders afterwards.
+graph, plus optionally two `.spsm` files (one with a stored Painter preview, one without). It points the library at that folder for the run and restores your folders afterwards.

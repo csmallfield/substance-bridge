@@ -1,6 +1,7 @@
 @tool
 extends RefCounted
-## The Substance library: .sbsar files in folders outside the project, referenced in place.
+## The Substance library: .sbsar files and Painter smart materials (.spsm) in folders outside
+## the project, referenced in place.
 ##
 ## Each library folder is scanned recursively; a file's subfolder is its category. Thumbnails
 ## (a sphere render) are cached in <folder>/.thumbnails, named after the file plus a short
@@ -10,10 +11,15 @@ extends RefCounted
 
 const THUMB_DIR := ".thumbnails"
 const THUMB_SIZE := 256
+## File types the library lists.
+const EXTENSIONS := ["sbsar", "spsm"]
+## Bumped when how smart-material thumbnails are made changes, so they are redone.
+const SPSM_THUMB_VERSION := 1
 
 
-## Every .sbsar under the folders, sorted by category then name. Entry keys:
-##   path      absolute path to the .sbsar
+## Every .sbsar and .spsm under the folders, sorted by category then name. Entry keys:
+##   path      absolute path to the file
+##   kind      "sbsar" or "spsm"
 ##   root      the library folder it was found in
 ##   category  subfolder relative to root ("" at the top)
 ##   name      file name without extension
@@ -36,7 +42,8 @@ static func scan(folders: PackedStringArray, cache_dir: String) -> Array[Diction
 
 static func _scan_dir(root: String, rel: String, dir: String, thumbs: String, entries: Array[Dictionary]) -> void:
 	for f in DirAccess.get_files_at(dir):
-		if f.get_extension().to_lower() != "sbsar":
+		var kind := f.get_extension().to_lower()
+		if not kind in EXTENSIONS:
 			continue
 		var path := dir.path_join(f)
 		var rel_path := rel.path_join(f) if not rel.is_empty() else f
@@ -45,10 +52,13 @@ static func _scan_dir(root: String, rel: String, dir: String, thumbs: String, en
 		if fa:
 			size = fa.get_length()
 			fa.close()
-		var key := ("%s|%d|%d" % [rel_path, size, FileAccess.get_modified_time(path)]).md5_text().substr(0, 10)
+		var stamp := "%s|%d|%d" % [rel_path, size, FileAccess.get_modified_time(path)]
+		if kind == "spsm":
+			stamp += "|spsm%d" % SPSM_THUMB_VERSION
+		var key := stamp.md5_text().substr(0, 10)
 		var name := f.get_basename()
 		entries.append({
-			"path": path, "root": root, "category": rel, "name": name, "key": key,
+			"path": path, "kind": kind, "root": root, "category": rel, "name": name, "key": key,
 			"thumb": thumbs.path_join("%s_%s.png" % [name.validate_filename(), key]),
 		})
 	for d in DirAccess.get_directories_at(dir):

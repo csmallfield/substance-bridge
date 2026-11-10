@@ -6,6 +6,10 @@ extends VBoxContainer
 ##
 ## "Use for New Material" (or a double-click) puts the file's path in the dock: the material
 ## references the .sbsar where it is; nothing is copied into the project.
+##
+## Painter smart materials (.spsm) are listed too, with their layer stack in the info panel.
+## They cannot make materials yet, so their preview is Painter's own image when the file has
+## one, else a sphere in the stack's flat base values.
 
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
@@ -14,6 +18,7 @@ const Library := preload("res://addons/substance_bridge/library/library.gd")
 const LibraryRenderer := preload("res://addons/substance_bridge/library/library_renderer.gd")
 const PreviewStage := preload("res://addons/substance_bridge/library/preview_stage.gd")
 const MeshBaker := preload("res://addons/substance_bridge/backends/substance/mesh_baker.gd")
+const SpsmDocument := preload("res://addons/substance_bridge/spsm/spsm_document.gd")
 
 ## The user chose a file for a new material.
 signal use_requested(path: String)
@@ -21,6 +26,7 @@ signal use_requested(path: String)
 signal thumbnails_done
 
 const TILE := 112
+const USE_TIP := "Put this file in the dock's New material field (it is referenced where it is, not copied)."
 const ALL := "All categories"
 
 var renderer: LibraryRenderer
@@ -45,6 +51,8 @@ var _grid_scroll: ScrollContainer
 var _empty: VBoxContainer
 var _body: HSplitContainer
 var _view: SubViewportContainer
+## Painter's own preview of a smart material, shown in place of the 3D view.
+var _painter_view: TextureRect
 var _view_status: Label
 var _shape: OptionButton
 var _use_button: Button
@@ -93,7 +101,7 @@ func _init() -> void:
 	_empty.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_empty.alignment = BoxContainer.ALIGNMENT_CENTER
 	var hint := Label.new()
-	hint.text = "Add a folder of .sbsar files to start your library.\nFiles stay where they are; materials reference them in place."
+	hint.text = "Add a folder of .sbsar or .spsm files to start your library.\nFiles stay where they are; materials reference them in place."
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty.add_child(hint)
 	var add := Button.new()
@@ -133,6 +141,13 @@ func _init() -> void:
 	vp.add_child(_preview_stage)
 	_view.add_child(vp)
 	side.add_child(_view)
+	_painter_view = TextureRect.new()
+	_painter_view.custom_minimum_size = Vector2(380, 380)
+	_painter_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_painter_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_painter_view.tooltip_text = "Substance Painter's own preview, stored in the file."
+	_painter_view.visible = false
+	side.add_child(_painter_view)
 	_view_status = Label.new()
 	_view_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_view_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -146,11 +161,11 @@ func _init() -> void:
 	row.add_child(_shape)
 	_use_button = Button.new()
 	_use_button.text = "Use for New Material"
-	_use_button.tooltip_text = "Put this file in the dock's New material field (it is referenced where it is, not copied)."
+	_use_button.tooltip_text = USE_TIP
 	_use_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_use_button.disabled = true
 	_use_button.pressed.connect(func() -> void:
-		if not _selected.is_empty():
+		if not _selected.is_empty() and _usable(_selected):
 			use_requested.emit(_selected["path"]))
 	row.add_child(_use_button)
 	_reveal_button = Button.new()
@@ -295,9 +310,11 @@ func _make_tile(e: Dictionary) -> Button:
 	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	b.add_theme_font_size_override("font_size", 12)
 	b.tooltip_text = "%s\n%s" % [e["name"], e["path"]]
+	if not _usable(e):
+		b.tooltip_text += "\nPainter smart material: shown for reference; it cannot make materials yet."
 	b.pressed.connect(func() -> void: select(e))
 	b.gui_input.connect(func(ev: InputEvent) -> void:
-		if ev is InputEventMouseButton and ev.double_click and ev.button_index == MOUSE_BUTTON_LEFT:
+		if ev is InputEventMouseButton and ev.double_click and ev.button_index == MOUSE_BUTTON_LEFT and _usable(e):
 			use_requested.emit(e["path"]))
 	return b
 
@@ -319,8 +336,17 @@ func _apply_filter() -> void:
 		tile.visible = show
 
 
-## Keywords and category from the graph, once it has been described this session.
+## True when the entry can make a material (smart materials cannot yet).
+static func _usable(e: Dictionary) -> bool:
+	return e.get("kind", "sbsar") == "sbsar"
+
+
+## Keywords and category from the graph, once it has been described this session. For a
+## smart material: its label, layer names and the graphs and bitmaps it uses.
 func _keywords(e: Dictionary) -> String:
+	if e.get("kind") == "spsm":
+		var cached: Array = renderer._spsm.get(e["path"], [])
+		return _spsm_keywords(cached[1]) if not cached.is_empty() else ""
 	var gs: GraphSettings = renderer._settings.get(e["path"])
 	if gs == null or gs.get_description() == null:
 		return ""
@@ -394,10 +420,15 @@ func select(e: Dictionary) -> void:
 	var tile: Button = _tiles.get(e["path"])
 	if tile:
 		tile.set_pressed_no_signal(true)
-	_use_button.disabled = false
+	_use_button.disabled = not _usable(e)
+	_use_button.tooltip_text = USE_TIP if _usable(e) else "Painter smart materials cannot make materials yet; the layer stack is shown for reference."
 	_reveal_button.disabled = false
 	_info.text = "[b]%s[/b]\nReading..." % e["name"]
 	_request_preview(e["path"])
+	if e.get("kind") == "spsm":
+		_info.text = spsm_info_text(e, renderer.spsm_for(e["path"]))
+		_apply_filter()
+		return
 	var gs := await renderer.settings_for(e["path"])
 	if _selected == e:
 		_info.text = info_text(e, gs.get_description())
@@ -423,7 +454,17 @@ func _request_preview(path: String) -> void:
 		if not String(out["error"]).is_empty():
 			_view_status.text = "Could not render: " + String(out["error"])
 			_preview_stage.set_material(null)
+			_show_painter_preview(null)
 			continue
+		if out.has("spsm"):
+			var img: Image = out["painter_preview"]
+			_show_painter_preview(img)
+			_preview_stage.mesh_driven = false
+			_preview_stage.set_material(out["material"])
+			_view_status.text = ("Substance Painter's preview, stored in the file." if img
+					else "Flat base colour, roughness and metallic only: the layer stack is not rendered yet.")
+			continue
+		_show_painter_preview(null)
 		_preview_stage.mesh_driven = out["mesh_driven"]
 		_preview_stage.set_material(out["material"])
 		_view_status.text = "%s, 512 maps in %.1f s%s" % [p.get_file().get_basename(), out["msec"] / 1000.0,
@@ -434,6 +475,19 @@ func _request_preview(path: String) -> void:
 
 ## A preview render finished (the material is on the large view).
 signal preview_done
+
+
+## Shows Painter's preview in place of the 3D view, or the 3D view again (img null).
+func _show_painter_preview(img: Image) -> void:
+	_painter_view.texture = ImageTexture.create_from_image(img) if img else null
+	_painter_view.visible = img != null
+	_view.visible = img == null
+	_shape.disabled = img != null
+
+
+## True while Painter's preview image is shown instead of the 3D view.
+func is_showing_painter_preview() -> bool:
+	return _painter_view.visible
 
 
 func is_previewing() -> bool:
@@ -583,3 +637,97 @@ static func _num(s: String) -> String:
 
 static func _esc(s: String) -> String:
 	return s.replace("[", "[lb]")
+
+
+# --- smart materials ------------------------------------------------------------------------------
+
+## BBCode for a smart material: what it is, what it needs, and its layer stack (top first).
+static func spsm_info_text(e: Dictionary, doc: SpsmDocument) -> String:
+	var t := PackedStringArray()
+	t.append("[b]%s[/b]" % _esc(doc.label if not doc.label.is_empty() else e["name"]))
+	t.append("[color=gray]%s · Painter smart material[/color]" % _esc(Library.category_label(e).path_join(String(e["path"]).get_file())))
+	if not doc.is_ok():
+		t.append("\n[color=salmon]Could not read the file: %s[/color]" % _esc("; ".join(doc.errors)))
+		return "\n".join(t)
+	var st := doc.stats()
+	t.append("[color=gray]Read only: the bridge cannot build smart material layer stacks into maps yet.[/color]")
+	var facts := PackedStringArray([
+		"[color=gray]Layers[/color] %d" % st["layers"],
+		"[color=gray]Graphs[/color] %d" % st["graphs"].size(),
+		"[color=gray]Bitmaps[/color] %d" % st["bitmaps"].size(),
+	])
+	if not st["channels"].is_empty():
+		facts.append("[color=gray]Channels[/color] " + _esc(", ".join(st["channels"])))
+	t.append(" · ".join(facts))
+
+	t.append("\n[b]Mesh inputs[/b]")
+	if st["mesh_maps"].is_empty():
+		t.append("  None: its generators don't use the mesh.")
+	else:
+		t.append("  Its generators read these mesh maps (the bridge can bake them all): " + _esc(", ".join(st["mesh_maps"])))
+
+	t.append("\n[b]Layers[/b] [color=gray](top first)[/color]")
+	_spsm_tree(doc.layer_tree(), 1, t)
+
+	if not st["graphs"].is_empty():
+		t.append("\n[b]Graphs inside[/b]")
+		t.append("  " + _esc(", ".join(_counted(st["graphs"]))))
+	if not st["bitmaps"].is_empty():
+		t.append("\n[b]Bitmaps inside[/b]")
+		t.append("  " + _esc(", ".join(_counted(st["bitmaps"]))))
+	return "\n".join(t)
+
+
+static func _spsm_tree(nodes: Array, depth: int, t: PackedStringArray) -> void:
+	var pad := "    ".repeat(depth)
+	for n: Dictionary in nodes:
+		var name := _esc(n["name"]) if not String(n["name"]).is_empty() else "(unnamed)"
+		var line := pad + ("[i]%s[/i] [color=gray]folder[/color]" % name if n["kind"] == "group" else name)
+		if not n["enabled"]:
+			line = "[color=gray]%s (hidden)[/color]" % line
+		t.append(line)
+		var details := PackedStringArray()
+		for s: String in n["sources"]:
+			details.append(_spsm_source(s))
+		if not n["mask"].is_empty():
+			details.append("mask: " + _esc(", ".join(n["mask"])))
+		for s: String in n["effects"]:
+			details.append(_esc(s))
+		if not n["blends"].is_empty():
+			details.append("blend " + _esc(", ".join(n["blends"])))
+		for d in details:
+			t.append("%s    [color=gray]%s[/color]" % [pad, d])
+		_spsm_tree(n["children"], depth + 1, t)
+
+
+## A fill source line, with a colour swatch for flat colours ("basecolor colour #b08a5c").
+static func _spsm_source(s: String) -> String:
+	var i := s.find("colour #")
+	if i < 0:
+		return _esc(s)
+	var hex := s.substr(i + 8, 6)
+	return "%s[color=#%s]■[/color] #%s%s" % [_esc(s.substr(0, i)), hex, hex, _esc(s.substr(i + 14))]
+
+
+static func _counted(names: Dictionary) -> PackedStringArray:
+	var keys := names.keys()
+	keys.sort_custom(func(a: String, b: String) -> bool: return a.naturalnocasecmp_to(b) < 0)
+	var out := PackedStringArray()
+	for k: String in keys:
+		out.append(k if int(names[k]) == 1 else "%s ×%d" % [k, names[k]])
+	return out
+
+
+static func _spsm_keywords(doc: SpsmDocument) -> String:
+	if not doc.is_ok():
+		return ""
+	var words := PackedStringArray([doc.label, "smart material", "spsm"])
+	var st := doc.stats()
+	words.append_array(PackedStringArray(st["graphs"].keys()))
+	words.append_array(PackedStringArray(st["bitmaps"].keys()))
+	var objects: Array[Dictionary] = []
+	SpsmDocument._walk(doc.layers(), func(o: Dictionary) -> void: objects.append(o))
+	for o in objects:
+		if o.has("label"):
+			words.append(String(o["label"]))
+	return " ".join(words)

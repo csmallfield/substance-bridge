@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://j1qf6wbth4mo"]
 
 [ext_resource type="ArrayMesh" uid="uid://c7tl20s1077v2" path="res://test/rock01_mesh.res" id="2_38xyi"]
+[ext_resource type="ArrayMesh" path="res://test/canister_mesh.res" id="3_canis"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_xu02d"]
 
@@ -46,6 +47,10 @@ shadow_enabled = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.060376324, 0)
 mesh = ExtResource("2_38xyi")
 
+[node name="Canister" type="MeshInstance3D" parent="." unique_id=1093384712]
+transform = Transform3D(0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -0.32, 0, 0)
+mesh = ExtResource("3_canis")
+
 [node name="Cube" type="MeshInstance3D" parent="." unique_id=581203377]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0.08, 0)
 mesh = SubResource("BoxMesh_test")
@@ -77,6 +82,6 @@ transform = Transform3D(0.9438584, -0.12914555, 0.30406058, 0, 0.9204183, 0.3909
 far = 2.589849
 
 [node name="OverviewCamera" type="Camera3D" parent="." unique_id=2067311458]
-transform = Transform3D(1, 0, 0, 0, 0.9515, 0.3078, 0, -0.3078, 0.9515, 0.7, 0.3, 0.68)
+transform = Transform3D(1, 0, 0, 0, 0.9515, 0.3078, 0, -0.3078, 0.9515, 0.62, 0.32, 0.82)
 current = true
 far = 20.0

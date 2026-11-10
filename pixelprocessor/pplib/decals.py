@@ -167,3 +167,29 @@ def arrow_head(M, x, y, w, h, tip_y):
     k = w / h
     side = (k * (y - tip_y) - M.fabs(x)) / math.hypot(1, k)
     return M.fmin(side, tip_y + h - y)
+
+
+# --- added for JRO Vol. 3 ------------------------------------------------------------------------------------------------
+def lobed(M, x, y, n, r, amp, rot_a=0.0):
+    """A rounded n-lobed blob: radius r * (1 + amp * cos(n * angle)), a lobe pointing up (rot_a turns it).
+    Approximate distance (scaled by the local radius), fine for outlines and profiles."""
+    rr, a = polar(M, x, y)
+    rad = r * (1.0 + amp * _cos(M, (a - rot_a) * n))
+    return (rad - rr) / (1.0 + abs(amp) * n * 0.5)
+
+
+def vesica(M, x, y, w, h):
+    """A lens / pointed oval of half width w and half height h, points up and down (intersection of two circles)."""
+    R = (w * w + h * h) / (2.0 * w)
+    return inter(M, circle(M, x, y, R, w - R, 0.0), circle(M, x, y, R, R - w, 0.0))
+
+
+def blades(M, x, y, n, r_in, r_out, width, sweep):
+    """n curved fan blades from r_in to r_out, each a band of half width `width` whose angle sweeps by `sweep`
+    radians from the inner to the outer radius (inside-positive)."""
+    rr, a = polar(M, x, y)
+    t = cl(M, (rr - r_in) / (r_out - r_in))
+    w = 2.0 * PI / n
+    a2 = a - t * sweep
+    a2 = a2 - M.floor(a2 / w + 0.5) * w
+    return M.fmin(width - M.fabs(a2) * rr, M.fmin(rr - r_in, r_out - rr))

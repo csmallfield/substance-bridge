@@ -6,8 +6,9 @@ extends Node
 ## Graphs that take mesh maps (AO, curvature, ...) get them baked from the preview sphere
 ## with the native baker, so edge effects show. One render runs at a time (run()).
 ##
-## Smart materials (.spsm) are not rendered yet: their thumbnail is Painter's own preview when
-## the file has one, else a sphere in the stack's flat base colour, roughness and metallic.
+## Smart materials (.spsm) render the same way (their layer stack is built into maps on the
+## sphere, spsm/spsm_renderer.gd); their thumbnail is Painter's own preview when the file has
+## one, which saves a full render per file while the library fills in.
 
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
@@ -90,9 +91,8 @@ func spsm_for(path: String) -> SpsmDocument:
 
 ## Renders an entry's maps at size_log2 into a new material.
 ## Returns {"material": StandardMaterial3D, "outputs": [...], "settings": GraphSettings,
-## "mesh_driven": bool, "msec": int, "error": String ("" if none)}. For a smart material:
-## "settings" is null, "spsm" is its SpsmDocument, "material" a flat base-value material and
-## "painter_preview" Painter's own preview Image (or null).
+## "mesh_driven": bool, "msec": int, "error": String ("" if none)}. A smart material also has
+## "spsm" (its SpsmDocument) and "painter_preview" (Painter's own preview Image, or null).
 func render(path: String, size_log2: int) -> Dictionary:
 	while _busy:
 		await get_tree().process_frame
@@ -107,7 +107,13 @@ func render(path: String, size_log2: int) -> Dictionary:
 func _render(path: String, size_log2: int) -> Dictionary:
 	var result := {"material": null, "outputs": [], "settings": null, "mesh_driven": false, "error": ""}
 	if path.get_extension().to_lower() == "spsm":
-		return await _render_spsm(path, result)
+		var doc := spsm_for(path)
+		result["spsm"] = doc
+		result["painter_preview"] = doc.preview_image() if doc.is_ok() else null
+		if not doc.is_ok():
+			result["error"] = "; ".join(doc.errors)
+			await get_tree().process_frame  # finish on a later frame, like a real render
+			return result
 	var gs := await settings_for(path)
 	result["settings"] = gs
 	if not gs.is_described():
@@ -136,42 +142,21 @@ func _render(path: String, size_log2: int) -> Dictionary:
 	return result
 
 
-func _render_spsm(path: String, result: Dictionary) -> Dictionary:
-	var doc := spsm_for(path)
-	result["spsm"] = doc
-	result["painter_preview"] = null
-	if not doc.is_ok():
-		result["error"] = "; ".join(doc.errors)
-		return result
-	result["painter_preview"] = doc.preview_image()
-	result["material"] = base_material(doc)
-	# Finish on a later frame, like a real render: callers that start a preview and then await
-	# preview_done would otherwise miss the signal.
-	await get_tree().process_frame
-	return result
-
-
-## A flat material from a smart material's base values (a stand-in until stacks render).
-static func base_material(doc: SpsmDocument) -> StandardMaterial3D:
-	var v := doc.base_values()
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = v.get("basecolor", Color(0.5, 0.5, 0.5))
-	mat.roughness = v.get("roughness", 0.5)
-	mat.metallic = v.get("metallic", 0.0)
-	return mat
-
-
 ## Renders a thumbnail for an entry and saves it to entry["thumb"]. Returns an error or "".
 func make_thumbnail(entry: Dictionary) -> String:
-	var out: Dictionary = await render(entry["path"], THUMB_SIZE_LOG2)
-	if not String(out["error"]).is_empty():
-		return out["error"]
-	var img: Image = out.get("painter_preview")
+	var img: Image = null
+	if entry.get("kind") == "spsm":
+		var doc := spsm_for(entry["path"])
+		img = doc.preview_image() if doc.is_ok() else null
 	if img != null:
 		img = img.duplicate() as Image
 		img.convert(Image.FORMAT_RGBA8)
 		img.resize(Library.THUMB_SIZE, Library.THUMB_SIZE, Image.INTERPOLATE_LANCZOS)
+		await get_tree().process_frame
 	else:
+		var out: Dictionary = await render(entry["path"], THUMB_SIZE_LOG2)
+		if not String(out["error"]).is_empty():
+			return out["error"]
 		img = await capture(out["material"], out["mesh_driven"])
 	if img == null:
 		return "The thumbnail render came back empty"

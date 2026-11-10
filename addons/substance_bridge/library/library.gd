@@ -14,7 +14,7 @@ const THUMB_SIZE := 256
 ## File types the library lists.
 const EXTENSIONS := ["sbsar", "spsm"]
 ## Bumped when how smart-material thumbnails are made changes, so they are redone.
-const SPSM_THUMB_VERSION := 1
+const SPSM_THUMB_VERSION := 2
 
 
 ## Every .sbsar and .spsm under the folders, sorted by category then name. Entry keys:

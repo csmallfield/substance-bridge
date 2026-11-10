@@ -74,13 +74,30 @@ folders) and re-rendered only for edited files. Selecting a file shows an orbita
 Material** or the dock's **Library** button puts its path in the dock. Files are referenced in
 place, never copied.
 
-Library folders can also hold Substance Painter smart materials (`.spsm`). The bridge reads them
-(`addons/substance_bridge/spsm/`) but cannot render them yet: the library shows their layer stack
-(fills, masks, filters, blends), the mesh maps their generators need and the graphs and bitmaps
-inside, with Painter's own stored preview as the thumbnail when there is one (else a sphere in the
-stack's flat base values). *Use for New Material* is disabled for them. An `.spsm` is HDF5 holding
-the layer stack (`preset.bin`, a tagged binary format), the embedded `.sbsar` graphs (they render
-with `sbsrender` as they are) and bitmaps (Qt header plus raw or LZ4 pixels).
+Library folders can also hold Substance Painter smart materials (`.spsm`), and they make materials
+like any `.sbsar`: pick one in the dock (or *Use for New Material* in the library), select a mesh
+and press *Create and Apply*. The mesh maps its generators read (AO, curvature, position, world
+normal, thickness) are baked from that mesh, exactly as for a mesh-driven graph, and the layer stack
+is built into maps (`addons/substance_bridge/spsm/spsm_renderer.gd`):
+
+- every generator and fill graph embedded in the file renders with `sbsrender`, wired to the baked
+  maps, flat colours or other graphs as Painter wires them (four at once, cached by their inputs);
+- embedded bitmaps (grunges, patterns) are decoded once into the editor cache;
+- the stack is composited on the GPU (a compute shader on a local `RenderingDevice`, so it runs off
+  the main thread): fills with their tiling, rotation and projection (UV, tri-planar, planar),
+  mask stacks (fills, folders, levels, filter graphs such as blur or emboss), every Painter blending
+  mode and opacity per channel, folders and pass-through folders, and (newer Painter files) anchor
+  points and references to them, user channels and the tangent-frame inputs Painter gives
+  mesh-based generators itself (worked out from the baked position and normal maps);
+- out come base colour, roughness, metallic, normal (OpenGL, with the height channel's relief
+  folded in, as Painter exports it), height, and AO / emissive / opacity when the stack writes them.
+
+Paint strokes saved in a smart material are skipped (with a warning). Compositing needs the Forward+
+or Mobile renderer, so smart materials don't render headless or on Compatibility. The library
+renders them on its sphere for the large preview; their thumbnail is Painter's own stored preview
+when the file has one. An `.spsm` is HDF5 holding the layer stack (`preset.bin`, a tagged binary
+format), the embedded `.sbsar` graphs and bitmaps (Qt header plus raw or LZ4 pixels). Painter's
+blending-mode numbers were read back from Painter itself (see `spsm_document.gd`).
 
 Generated textures and materials go to `res://substance_bridge/<name>/` and are git-ignored; the
 `<name>_graph.tres` settings next to them are tracked, because everything else is regenerated
@@ -98,6 +115,8 @@ From the project folder (`<godot>` is the 4.7 console executable):
 <godot> --headless --path . --script res://addons/substance_bridge/tests/routing_check.gd
 <godot> --headless --path . --script res://addons/substance_bridge/tests/spsm_check.gd   (set SUBSTANCE_BRIDGE_SPSM to a folder of .spsm files for the file checks)
 <godot> --path . --script res://addons/substance_bridge/tests/native_bake_check.gd   (windowed: native baker vs sbsbaker)
+<godot> --path . --script res://addons/substance_bridge/tests/spsm_gpu_check.gd   (windowed: smart-material blends on the GPU)
+<godot> --path . --script res://addons/substance_bridge/tests/spsm_render_check.gd   (windowed; set SUBSTANCE_BRIDGE_SPSM: renders sample smart materials on the preview sphere)
 ```
 
 The editor self-test (`tests/selftest.gd`) drives the dock end to end. Set

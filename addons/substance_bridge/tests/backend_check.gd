@@ -4,6 +4,7 @@ extends SceneTree
 
 const SubstanceBackend := preload("res://addons/substance_bridge/backends/substance/substance_backend.gd")
 const RenderRequest := preload("res://addons/substance_bridge/backends/render_request.gd")
+const RenderResult := preload("res://addons/substance_bridge/backends/render_result.gd")
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 
 const TARMAC := "C:/Program Files/Allegorithmic/Adobe Substance 3D for Maya/2022/sbsars/tarmac.sbsar"
@@ -44,6 +45,13 @@ func _init() -> void:
 	fails += _expect(SubstanceBackend.format_value(Color(0.1, 0.2, 0.3, 1.0), "float3") == "0.1,0.2,0.3", "color -> float3")
 	fails += _expect(SubstanceBackend.format_value(true, "int") == "1", "bool -> int")
 	fails += _expect(SubstanceBackend.format_value(Vector2(3.4, 5.6), "int2") == "3,6", "vector2 -> int2")
+
+	# --- report with a value output (a float, not a file), as some graphs have
+	var rr := RenderResult.new()
+	backend._read_report('[{"outputs": [{"identifier": "range_out", "value": 0.53, "usages": []}, '
+			+ '{"identifier": "basecolor", "value": "%s", "usages": ["baseColor"]}]}]' % ProjectSettings.globalize_path("res://project.godot"), rr)
+	fails += _expect(rr.errors.is_empty() and rr.outputs.size() == 1 and rr.maps.has("baseColor"),
+			"a value output in the report is skipped, not read as a file (%s)" % ", ".join(rr.errors))
 
 	# --- render tarmac, OpenGL normals requested
 	var req := RenderRequest.new()

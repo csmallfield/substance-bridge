@@ -7,9 +7,8 @@ extends VBoxContainer
 ## "Use for New Material" (or a double-click) puts the file's path in the dock: the material
 ## references the .sbsar where it is; nothing is copied into the project.
 ##
-## Painter smart materials (.spsm) are listed too, with their layer stack in the info panel.
-## They cannot make materials yet, so their preview is Painter's own image when the file has
-## one, else a sphere in the stack's flat base values.
+## Painter smart materials (.spsm) are listed too: their layer stack renders on the sphere like
+## a mesh-driven graph, and the info panel lists the stack.
 
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
@@ -51,8 +50,6 @@ var _grid_scroll: ScrollContainer
 var _empty: VBoxContainer
 var _body: HSplitContainer
 var _view: SubViewportContainer
-## Painter's own preview of a smart material, shown in place of the 3D view.
-var _painter_view: TextureRect
 var _view_status: Label
 var _shape: OptionButton
 var _use_button: Button
@@ -141,13 +138,6 @@ func _init() -> void:
 	vp.add_child(_preview_stage)
 	_view.add_child(vp)
 	side.add_child(_view)
-	_painter_view = TextureRect.new()
-	_painter_view.custom_minimum_size = Vector2(380, 380)
-	_painter_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_painter_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_painter_view.tooltip_text = "Substance Painter's own preview, stored in the file."
-	_painter_view.visible = false
-	side.add_child(_painter_view)
 	_view_status = Label.new()
 	_view_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_view_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -310,8 +300,8 @@ func _make_tile(e: Dictionary) -> Button:
 	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	b.add_theme_font_size_override("font_size", 12)
 	b.tooltip_text = "%s\n%s" % [e["name"], e["path"]]
-	if not _usable(e):
-		b.tooltip_text += "\nPainter smart material: shown for reference; it cannot make materials yet."
+	if e.get("kind") == "spsm":
+		b.tooltip_text += "\nPainter smart material"
 	b.pressed.connect(func() -> void: select(e))
 	b.gui_input.connect(func(ev: InputEvent) -> void:
 		if ev is InputEventMouseButton and ev.double_click and ev.button_index == MOUSE_BUTTON_LEFT and _usable(e):
@@ -336,9 +326,9 @@ func _apply_filter() -> void:
 		tile.visible = show
 
 
-## True when the entry can make a material (smart materials cannot yet).
+## True when the entry can make a material (every kind the library lists can).
 static func _usable(e: Dictionary) -> bool:
-	return e.get("kind", "sbsar") == "sbsar"
+	return e.get("kind", "sbsar") in Library.EXTENSIONS
 
 
 ## Keywords and category from the graph, once it has been described this session. For a
@@ -421,7 +411,7 @@ func select(e: Dictionary) -> void:
 	if tile:
 		tile.set_pressed_no_signal(true)
 	_use_button.disabled = not _usable(e)
-	_use_button.tooltip_text = USE_TIP if _usable(e) else "Painter smart materials cannot make materials yet; the layer stack is shown for reference."
+	_use_button.tooltip_text = USE_TIP
 	_reveal_button.disabled = false
 	_info.text = "[b]%s[/b]\nReading..." % e["name"]
 	_request_preview(e["path"])
@@ -454,40 +444,18 @@ func _request_preview(path: String) -> void:
 		if not String(out["error"]).is_empty():
 			_view_status.text = "Could not render: " + String(out["error"])
 			_preview_stage.set_material(null)
-			_show_painter_preview(null)
 			continue
-		if out.has("spsm"):
-			var img: Image = out["painter_preview"]
-			_show_painter_preview(img)
-			_preview_stage.mesh_driven = false
-			_preview_stage.set_material(out["material"])
-			_view_status.text = ("Substance Painter's preview, stored in the file." if img
-					else "Flat base colour, roughness and metallic only: the layer stack is not rendered yet.")
-			continue
-		_show_painter_preview(null)
 		_preview_stage.mesh_driven = out["mesh_driven"]
 		_preview_stage.set_material(out["material"])
-		_view_status.text = "%s, 512 maps in %.1f s%s" % [p.get_file().get_basename(), out["msec"] / 1000.0,
-				"; mesh maps baked on the sphere" if out["mesh_driven"] else ""]
+		var how := "; layer stack built on the sphere" if out.has("spsm") else (
+				"; mesh maps baked on the sphere" if out["mesh_driven"] else "")
+		_view_status.text = "%s, 512 maps in %.1f s%s" % [p.get_file().get_basename(), out["msec"] / 1000.0, how]
 	_preview_running = false
 	preview_done.emit()
 
 
 ## A preview render finished (the material is on the large view).
 signal preview_done
-
-
-## Shows Painter's preview in place of the 3D view, or the 3D view again (img null).
-func _show_painter_preview(img: Image) -> void:
-	_painter_view.texture = ImageTexture.create_from_image(img) if img else null
-	_painter_view.visible = img != null
-	_view.visible = img == null
-	_shape.disabled = img != null
-
-
-## True while Painter's preview image is shown instead of the 3D view.
-func is_showing_painter_preview() -> bool:
-	return _painter_view.visible
 
 
 func is_previewing() -> bool:
@@ -650,7 +618,7 @@ static func spsm_info_text(e: Dictionary, doc: SpsmDocument) -> String:
 		t.append("\n[color=salmon]Could not read the file: %s[/color]" % _esc("; ".join(doc.errors)))
 		return "\n".join(t)
 	var st := doc.stats()
-	t.append("[color=gray]Read only: the bridge cannot build smart material layer stacks into maps yet.[/color]")
+	t.append("[color=gray]Use builds its layer stack into maps on your mesh: generators, masks, filters and blends are rendered; paint strokes are skipped.[/color]")
 	var facts := PackedStringArray([
 		"[color=gray]Layers[/color] %d" % st["layers"],
 		"[color=gray]Graphs[/color] %d" % st["graphs"].size(),
@@ -664,7 +632,7 @@ static func spsm_info_text(e: Dictionary, doc: SpsmDocument) -> String:
 	if st["mesh_maps"].is_empty():
 		t.append("  None: its generators don't use the mesh.")
 	else:
-		t.append("  Its generators read these mesh maps (the bridge can bake them all): " + _esc(", ".join(st["mesh_maps"])))
+		t.append("  Baked from your mesh when you use it: " + _esc(", ".join(st["mesh_maps"])))
 
 	t.append("\n[b]Layers[/b] [color=gray](top first)[/color]")
 	_spsm_tree(doc.layer_tree(), 1, t)

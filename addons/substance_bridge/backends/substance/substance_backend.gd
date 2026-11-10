@@ -125,7 +125,10 @@ func _read_report(stdout: String, res: RenderResult) -> void:
 		return
 	for graph: Dictionary in report:
 		for o: Dictionary in graph.get("outputs", []):
-			var path: String = o.get("value", "")
+			# Value outputs (a float, a colour) report their value here, not a file: not maps.
+			if not o.get("value") is String:
+				continue
+			var path: String = o["value"]
 			var usages: Array = o.get("usages", [])
 			res.outputs.append({"id": o.get("identifier", ""), "label": o.get("label", ""),
 					"usages": usages, "path": path})

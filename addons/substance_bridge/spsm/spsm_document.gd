@@ -22,9 +22,18 @@ const CHANNELS := {
 	0x1: "basecolor", 0x2: "height", 0x8: "opacity", 0x10: "emissive", 0x80: "roughness",
 	0x2000: "metallic", 0x400000: "normal", 0x800000: "ambientOcclusion",
 }
-## Blending mode numbers whose meaning is certain (from the channel each is the default for).
-## The others found in files (1, 8, 11, 12, 21, 29) are shown as "mode N" until calibrated.
-const BLEND_MODES := {2: "Normal", 4: "Multiply", 10: "Linear dodge (Add)", 25: "Passthrough", 27: "Normal map combine"}
+## Painter's blending modes by number. 0, 2, 4, 10, 11, 23, 25 and 27 were read back from
+## Painter 2019.2 (remote scripting) on its sample projects; the rest follow the order of
+## Painter's internal blend codes (Disa, Repl, Norm, Drk, Mul, ... Sadd), which those confirm.
+const BLEND_MODES := {
+	0: "Disable", 1: "Replace", 2: "Normal", 3: "Darken (Min)", 4: "Multiply", 5: "Color burn",
+	6: "Linear burn", 7: "Lighten (Max)", 8: "Screen", 9: "Color dodge", 10: "Linear dodge (Add)",
+	11: "Overlay", 12: "Soft light", 13: "Hard light", 14: "Vivid light", 15: "Linear light",
+	16: "Pin light", 17: "Difference", 18: "Exclusion", 19: "Saturation", 20: "Color", 21: "Value",
+	22: "Tint", 23: "Divide", 24: "Inverse divide", 25: "Passthrough", 26: "Normal map combine",
+	27: "Normal map detail", 28: "Normal map inverse detail", 29: "Subtract", 30: "Inverse subtract",
+	31: "Signed addition (AddSub)",
+}
 ## Painter's default blend per channel; only differences are reported.
 const DEFAULT_BLEND := {0x2: 10, 0x400000: 27, 0x800000: 4}
 ## Mesh maps a procedural can take, as resource aliases -> MeshBaker usage names.
@@ -348,17 +357,18 @@ func _blend_notes(l: Dictionary) -> PackedStringArray:
 	for b: Variant in l.get("perChannelBlending", []):
 		if not b is Dictionary:
 			continue
-		var bit := int(b.get("channelTypes", 0))
-		if not CHANNELS.has(bit):
-			continue
+		var bits := int(b.get("channelTypes", 0))  # newer files: one entry can cover several
 		var mode := int(b.get("blendingMode", 2))
 		var opacity := float(b.get("opacity", 1.0))
-		if mode == int(DEFAULT_BLEND.get(bit, 2)) and is_equal_approx(opacity, 1.0):
-			continue
-		var note := "%s: %s" % [CHANNELS[bit], blend_name(mode)]
-		if not is_equal_approx(opacity, 1.0):
-			note += " %d%%" % roundi(opacity * 100.0)
-		notes.append(note)
+		for bit: int in CHANNELS:
+			if not bits & bit:
+				continue
+			if mode == int(DEFAULT_BLEND.get(bit, 2)) and is_equal_approx(opacity, 1.0):
+				continue
+			var note := "%s: %s" % [CHANNELS[bit], blend_name(mode)]
+			if not is_equal_approx(opacity, 1.0):
+				note += " %d%%" % roundi(opacity * 100.0)
+			notes.append(note)
 	return notes
 
 
@@ -368,7 +378,7 @@ static func blend_name(mode: int) -> String:
 
 static func channel_names(bits: int) -> PackedStringArray:
 	var out := PackedStringArray()
-	if bits == 0 or bits == 0xFFFFFFFF:
+	if bits == 0 or bits == 0xFFFFFFFF or bits < 0:  # none, or "all" (-1 in newer files)
 		return out
 	for bit: int in CHANNELS:
 		if bits & bit:
@@ -377,12 +387,11 @@ static func channel_names(bits: int) -> PackedStringArray:
 
 
 ## Counts and lists for the info panel: {"layers": int (fill and group layers, nested),
-## "graphs": {name: uses}, "bitmaps": {name: uses}, "mesh_maps": PackedStringArray (MeshBaker
-## usages an enabled procedural takes), "channels": PackedStringArray (channels the stack writes)}.
+## "graphs": {name: uses}, "bitmaps": {name: uses}, "mesh_maps": PackedStringArray (see
+## mesh_usages()), "channels": PackedStringArray (channels the stack writes)}.
 func stats() -> Dictionary:
 	var s := {"layers": 0, "graphs": {}, "bitmaps": {}, "mesh_maps": PackedStringArray(), "channels": PackedStringArray()}
 	var bits := 0
-	var mesh := {}
 	var objects: Array[Dictionary] = []
 	_walk(root.get("layerGroup", {}), func(o: Dictionary) -> void: objects.append(o))
 	for o in objects:
@@ -392,22 +401,47 @@ func stats() -> Dictionary:
 			"DataProcedural":
 				var n := resource_name(o.get("urlToSbsRes", ""))
 				s["graphs"][n] = int(s["graphs"].get(n, 0)) + 1
-				for si: Variant in o.get("sourcesInputs", []):
-					if si is Dictionary and si.get("source") is Dictionary:
-						var bm: Variant = si["source"].get("bitmap")
-						if bm is Dictionary and MESH_MAPS.has(bm.get("urlToBitmapRes", "")):
-							mesh[MESH_MAPS[bm["urlToBitmapRes"]]] = true
 			"DataBitmap":
 				var u := String(o.get("urlToBitmapRes", ""))
 				if not u.begins_with("resourcealias:"):
 					var n := resource_name(u)
 					s["bitmaps"][n] = int(s["bitmaps"].get(n, 0)) + 1
-			"DataSourceUniform", "DataProceduralOutput":
+			"DataSourceUniform", "DataProceduralOutput", "DataSourceBitmap":
 				bits |= int(o.get("channelTypes", 0))
 	s["layers"] -= 1  # the top group is the material itself
-	s["mesh_maps"] = PackedStringArray(mesh.keys())
+	s["mesh_maps"] = mesh_usages()
 	s["channels"] = channel_names(bits)
 	return s
+
+
+## The mesh maps (MeshBaker usages) the enabled layers need: graph inputs, mesh maps used as
+## bitmaps, and position + world-space normal for tri-planar and planar fills.
+func mesh_usages() -> PackedStringArray:
+	var found := {}
+	_mesh_usages(root.get("layerGroup", {}), found)
+	var out := PackedStringArray()
+	for usage: String in MESH_MAPS.values():
+		if found.has(usage):
+			out.append(usage)
+	return out
+
+
+func _mesh_usages(o: Variant, found: Dictionary) -> void:
+	if o is Dictionary:
+		if not bool(o.get("enabled", true)):
+			return
+		var url := String(o.get("urlToBitmapRes", ""))
+		if MESH_MAPS.has(url):
+			found[MESH_MAPS[url]] = true
+		if o.get("@") == "DataActionFill" and int(o.get("projection", 0)) in [1, 2]:
+			found["position"] = true
+			found["normalWS"] = true
+		for v: Variant in o.values():
+			if v is Dictionary or v is Array:
+				_mesh_usages(v, found)
+	elif o is Array:
+		for v: Variant in o:
+			_mesh_usages(v, found)
 
 
 ## Rough flat values for a quick look before the stack is rendered: per channel, the topmost

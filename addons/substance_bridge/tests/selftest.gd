@@ -7,6 +7,7 @@ extends RefCounted
 ##
 ## Run with the editor headless:
 ##   set SUBSTANCE_BRIDGE_SELFTEST=<path to tarmac.sbsar>
+##   (optional, windowed only) set SUBSTANCE_BRIDGE_SELFTEST_SPSM=<path to a Painter .spsm>
 ##   godot --headless --editor --path <project> --log-file <temp>/selftest.log
 ##
 ## Pass --log-file: test runs share the project's log folder, and Godot keeps only five logs,
@@ -168,6 +169,10 @@ func run(dock: Node, sbsar: String) -> void:
 	var noise := OS.get_environment("SUBSTANCE_BRIDGE_SELFTEST_NOISE")
 	if not noise.is_empty():
 		await _noise_lab(dock, rock, noise)
+	# Painter smart material: composited on a RenderingDevice, so a windowed editor only.
+	var spsm := OS.get_environment("SUBSTANCE_BRIDGE_SELFTEST_SPSM")
+	if not spsm.is_empty():
+		await _smart_material(dock, rock, spsm)
 	fs.scan()
 	_quit()
 
@@ -222,6 +227,27 @@ func _mesh_adaptive(dock: Node, rock: MeshInstance3D, sbsar: String) -> void:
 	gs.mesh_obj = ""
 	var r: Dictionary = await Pipeline.new().render(gs, gs.preview_size)
 	_expect(String(r.get("error", "")).contains("Bake from Selected Mesh"), "missing mesh is explained: %s" % r.get("error", "no error"))
+	if OS.get_environment("SUBSTANCE_BRIDGE_KEEP") != "1":
+		rock.material_override = null
+		await _cleanup(gs)
+
+
+## Smart material (.spsm): its mesh maps bake from Rock, its stack renders into maps, the
+## material lands on Rock.
+func _smart_material(dock: Node, rock: MeshInstance3D, spsm: String) -> void:
+	print("[selftest] smart material: ", spsm)
+	await _wait_idle(dock)
+	var gs: GraphSettings = await dock.create_material(spsm, [rock] as Array[MeshInstance3D])
+	_expect(gs != null and gs.backend_id == "spsm", "smart material settings created (%s)" % (gs.backend_id if gs else "null"))
+	if gs == null:
+		return
+	var mat := gs.material
+	_expect(mat != null and mat.albedo_texture != null and mat.normal_texture != null and mat.roughness_texture != null,
+			"smart material built albedo, normal and roughness")
+	_expect(not gs.mesh_usages().is_empty() and not gs.mesh_obj.is_empty(), "its mesh maps were baked from Rock (%s)" % ", ".join(gs.mesh_usages()))
+	_expect(mat != null and rock.material_override == mat, "smart material applied to Rock")
+	if mat != null and mat.albedo_texture != null:
+		_expect(mat.albedo_texture.get_width() == 1 << gs.preview_size, "smart material preview is %d px" % (1 << gs.preview_size))
 	if OS.get_environment("SUBSTANCE_BRIDGE_KEEP") != "1":
 		rock.material_override = null
 		await _cleanup(gs)

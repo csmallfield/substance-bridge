@@ -93,7 +93,7 @@ func _init() -> void:
 
 	add_child(_heading("New material"))
 	_source_kind = OptionButton.new()
-	_source_kind.add_item("Substance (.sbsar)")
+	_source_kind.add_item("Substance (.sbsar, .spsm)")
 	_source_kind.add_item("Noise Lab (native)")
 	_source_kind.item_selected.connect(func(_i: int) -> void: _refresh_source_rows())
 	add_child(_source_kind)
@@ -103,15 +103,15 @@ func _init() -> void:
 	var src_row := HBoxContainer.new()
 	_sbsar_row = src_row
 	_sbsar_edit = LineEdit.new()
-	_sbsar_edit.placeholder_text = ".sbsar file"
+	_sbsar_edit.placeholder_text = ".sbsar or .spsm file"
 	_sbsar_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var browse := Button.new()
 	browse.text = "..."
-	browse.tooltip_text = "Choose an .sbsar file"
+	browse.tooltip_text = "Choose an .sbsar file or a Painter smart material (.spsm)"
 	browse.pressed.connect(_on_browse)
 	var library := Button.new()
 	library.text = "Library"
-	library.tooltip_text = "Pick an .sbsar from your library (the Substance tab at the top)."
+	library.tooltip_text = "Pick a file from your library (the Substance tab at the top)."
 	library.pressed.connect(func() -> void: library_requested.emit())
 	src_row.add_child(_sbsar_edit)
 	src_row.add_child(browse)
@@ -119,7 +119,7 @@ func _init() -> void:
 	add_child(src_row)
 	_create_button = Button.new()
 	_create_button.text = "Create and Apply to Selected"
-	_create_button.tooltip_text = "Make a new material from this .sbsar, render a preview and apply it to the selected MeshInstance3D nodes."
+	_create_button.tooltip_text = "Make a new material from this file, render a preview and apply it to the selected MeshInstance3D nodes."
 	_create_button.pressed.connect(_on_create_pressed)
 	add_child(_create_button)
 
@@ -269,6 +269,7 @@ func _ready() -> void:
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
 	_file_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
 	_file_dialog.add_filter("*.sbsar", "Substance archive")
+	_file_dialog.add_filter("*.spsm", "Painter smart material")
 	_file_dialog.file_selected.connect(func(path: String) -> void: _sbsar_edit.text = path)
 	add_child(_file_dialog)
 	_sbsar_edit.text = String(EditorInterface.get_editor_settings().get_project_metadata(
@@ -291,7 +292,7 @@ func _refresh_source_rows() -> void:
 		set_status("The noise lab is not linked into this project (res://noiselab). See the README.")
 
 
-## The source the Create button would use: an .sbsar path or "noiselab://<noise>".
+## The source the Create button would use: an .sbsar or .spsm path, or "noiselab://<noise>".
 func _chosen_source() -> String:
 	if _source_kind.selected == 1:
 		if _noise_option.item_count == 0:
@@ -354,7 +355,7 @@ func _on_create_pressed() -> void:
 	await create_material(_chosen_source(), targets)
 
 
-## Creates settings for an .sbsar, renders a preview and applies the material to targets.
+## Creates settings for an .sbsar or .spsm, renders a preview and applies the material to targets.
 ## Returns the new GraphSettings, or null. Also used by the self-test.
 func create_material(sbsar: String, targets: Array[MeshInstance3D]) -> GraphSettings:
 	if _busy:
@@ -362,7 +363,7 @@ func create_material(sbsar: String, targets: Array[MeshInstance3D]) -> GraphSett
 		return null
 	var is_noise := sbsar.begins_with(NoiseLabBackend.SCHEME)
 	if sbsar.is_empty() or (not is_noise and not FileAccess.file_exists(sbsar)):
-		set_status("Choose an existing .sbsar file." if not is_noise else "Choose a noise.")
+		set_status("Choose an existing .sbsar or .spsm file." if not is_noise else "Choose a noise.")
 		return null
 	if not is_noise:
 		EditorInterface.get_editor_settings().set_project_metadata("substance_bridge", LAST_SBSAR_META, sbsar)

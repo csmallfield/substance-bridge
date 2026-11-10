@@ -8,9 +8,10 @@ extends RefCounted
 ## garbage. Objects become Dictionaries with their class name under "@".
 ##
 ## Type bytes (all seen in real files):
-##   01 float  02/03/04 vec2/3/4 float  05 int32  06/07/08 int2/3/4  09/0C/0F int64  0A bool
+##   01 float  02/03/04 vec2/3/4 float  05 int32  06/07/08 int2/3/4  09/0C/0F/15 int64  0A bool
 ##   0B uint32  0D 3x3 float matrix  0E 4x4 float matrix  10 string  11/13 list
 ##   12/14 object (flag FF = null)
+## 15 appears in newer files (data version 68: 64-bit channel masks such as channelType).
 
 const HEADER_SIZE := 12
 
@@ -57,7 +58,7 @@ func _value(type: int) -> Variant:
 			return Vector3i(_i32(), _i32(), _i32())
 		0x08:
 			return Vector4i(_i32(), _i32(), _i32(), _i32())
-		0x09, 0x0C, 0x0F:
+		0x09, 0x0C, 0x0F, 0x15:
 			return _i64()
 		0x0A:
 			return _u8() != 0

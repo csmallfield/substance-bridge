@@ -36,7 +36,7 @@ const RESERVED := ["source", "random_seed", "preview_size", "final_size", "auto_
 ## The .sbsar this material is generated from. Read-only in the inspector: the folder,
 ## material name and parameter values all belong to this graph. To try another .sbsar on
 ## the same mesh, create a new material from the dock.
-@export_custom(PROPERTY_HINT_GLOBAL_FILE, "*.sbsar", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY)
+@export_custom(PROPERTY_HINT_GLOBAL_FILE, "*.sbsar,*.spsm", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY)
 var source := "":
 	set(v):
 		if v == source:

@@ -196,7 +196,10 @@ static func _write_import_settings(res_path: String, is_normal: bool, flip_green
 func _import(paths: Array, known: PackedStringArray) -> bool:
 	var fs := EditorInterface.get_resource_filesystem()
 	var tree := Engine.get_main_loop() as SceneTree
-	# Known files: reimport now (synchronous) so the new pixels and settings apply.
+	# Known files: reimport now (synchronous) so the new pixels and settings apply. Check again:
+	# entries left from a deleted folder of the same name can drop out of the editor's file
+	# list (a scan in between) and then count as new; reimporting those only logs errors.
+	known = PackedStringArray(Array(known).filter(func(p: String) -> bool: return not fs.get_file_type(p).is_empty()))
 	if not known.is_empty():
 		fs.reimport_files(known)
 	if known.size() == paths.size():

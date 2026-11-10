@@ -58,22 +58,28 @@ func _unit_checks() -> void:
 	bad.qmap()
 	_expect(not bad.ok(), "qt stream stops on an unknown type")
 
-	# Preset: an object holding a float, a string, a vec3 and a list of one null object.
+	# Preset: an object holding a float, a string, a vec3, a 64-bit channel mask (type 0x15, newer
+	# files) and a list of one null object.
 	var p := PackedByteArray()
 	p.resize(12)
 	var body := PackedByteArray()
 	body.append_array(_field("opacity", 0x01, _f32(0.5)))
 	body.append_array(_field("label", 0x10, _str("Base")))
 	body.append_array(_field("color", 0x03, _f32(1.0) + _f32(0.5) + _f32(0.25)))
+	var mask64 := PackedByteArray()
+	mask64.resize(8)
+	mask64.encode_s64(0, 1 << 39)
+	body.append_array(_field("channelType", 0x15, mask64))
 	var list := PackedByteArray([0x12, 0xFF])
 	body.append_array(_field("items", 0x11, list, true))
-	var obj := PackedByteArray([0x12, 0x00, 0, 0, 0, 0]) + _str("DataLayersPreset") + PackedByteArray([4, 0]) + body
+	var obj := PackedByteArray([0x12, 0x00, 0, 0, 0, 0]) + _str("DataLayersPreset") + PackedByteArray([5, 0]) + body
 	p.append_array(obj)
 	_fix_ends(p)
 	var d := Preset.decode(p)
 	var r: Dictionary = d["root"]
 	_expect(d["error"] == "" and r.get("@") == "DataLayersPreset" and r.get("label") == "Base"
-			and r.get("color") == Vector3(1.0, 0.5, 0.25) and r.get("items") == [null], "preset decode %s %s" % [d["error"], r])
+			and r.get("color") == Vector3(1.0, 0.5, 0.25) and r.get("channelType") == 1 << 39 and r.get("items") == [null],
+			"preset decode %s %s" % [d["error"], r])
 	p[p.size() - 2] = 0x77  # corrupt the list item's type byte: must report, not misread
 	_expect(Preset.decode(p)["error"] != "", "preset reports a corrupt type")
 

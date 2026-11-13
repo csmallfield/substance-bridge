@@ -76,3 +76,30 @@ Brick Row Houses, Podium Tower, AC Block, Night Lights.
 
 **Lesson:** an RGBA Pixel Processor whose alpha carried data (the glow) made the interiors vanish, because blends
 composite by alpha. Keep alpha at 1 and give the data its own grey Pixel Processor.
+
+## Derelict variant: `building_facade_derelict.sbsar`
+
+This variant is built from the same script: `building_facade_derelict.py` sets `VARIANT = 'derelict'` and runs
+`building_facade.py`. It has every facade parameter plus a **Disrepair** group (114 parameters in all):
+- **Disrepair:** a master amount (0–1.5) that scales everything below.
+- **Broken Windows:** smashed panes with a jagged hole and radiating cracks; a third have lost their glass
+  entirely.
+- **Boarded Up:** planks over windows and doors, horizontal or vertical, some with a diagonal brace.
+- **Cracks:** wandering crack lines in patches.
+- **Crumbling:** render or cladding fallen away near openings and edges. Under Layer picks what shows beneath:
+  rough concrete, or brick with its own joints.
+- **Rot and Mould:** black-green mould in damp places (under sills, in cavities) and rot on the boards.
+- **Moss:** clumps on ledges and in damp corners.
+- **Ivy:** vines with leaf clusters climbing from the bottom of the tile. Ivy Height sets how far up it reaches.
+- **Filth:** heavy soot and dirt all over.
+- **Colours:** boards, ivy and moss.
+
+**Presets (7):** Abandoned Office, Squatted Block, Overgrown Brick, Crumbling Render, Boarded Shops, Total Ruin,
+Light Neglect.
+
+**Check:** `bridge_check_derelict.gd` passes.
+
+**Fix on the way:** the per-window random values came from a sine hash on small integers. They clumped, so the
+Broken and Boarded sliders responded unevenly. Window keys now use the exact mod-289 hash (`pplib.rocks.hash12`),
+which is evenly spread and identical on the GPU. This also reshuffles which windows get curtains in the clean
+facade.

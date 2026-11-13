@@ -11,8 +11,12 @@ from sbsops import Ops
 import sbsfunc as M
 import facade_layout as L
 
-pkg = Package('building_facade')
-g = pkg.graph('building_facade', 'Building Facade', category='Architecture', author='Claude',
+VARIANT = globals().get('VARIANT', 'clean')   # building_facade_derelict.py sets 'derelict'
+DER = VARIANT == 'derelict'
+
+pkg = Package('building_facade_derelict' if DER else 'building_facade')
+g = pkg.graph('building_facade_derelict' if DER else 'building_facade',
+              'Building Facade Derelict' if DER else 'Building Facade', category='Architecture', author='Claude',
               description='A tileable modular building facade: choose the wall material and tune the window '
                           'arrangement (ribbon, punched, grouped bays, curtain wall, balconies), frames, interiors '
                           'and weathering.',
@@ -157,6 +161,25 @@ STREAKS = slider('streaks', 'Streaks', 0.4, 'Weathering', 'Dirt running down fro
 STAINS = slider('stains', 'Stains', 0.15, 'Weathering', 'Large blotchy discolouration.')
 DIRT_C = colour('dirt_color', 'Dirt Colour', (0.18, 0.16, 0.13), 'Weathering')
 
+if DER:
+    DECAY = slider('disrepair', 'Disrepair', 1.0, 'Disrepair', 'Master amount: scales every decay effect below.', 0.0, 1.5)
+    BROKEN = slider('broken_windows', 'Broken Windows', 0.35, 'Disrepair', 'Share of windows with smashed panes '
+                    '(a third of those lose their glass entirely).')
+    BOARDED = slider('boarded_up', 'Boarded Up', 0.2, 'Disrepair', 'Share of windows and doors covered in planks.')
+    CRACKS = slider('cracks', 'Cracks', 0.5, 'Disrepair')
+    CRUMBLE = slider('crumbling', 'Crumbling', 0.4, 'Disrepair', 'Render and cladding fallen away, mostly around '
+                     'openings and edges, showing the layer underneath.')
+    UNDER = slider('under_layer', 'Under Layer', 1.0, 'Disrepair', '0 = rough concrete, 1 = brick behind the crumbled '
+                   'surface.')
+    ROT = slider('rot', 'Rot and Mould', 0.4, 'Disrepair', 'Black-green mould in damp places, rot on boards.')
+    MOSS = slider('moss', 'Moss', 0.3, 'Disrepair', 'Moss on ledges and in damp corners.')
+    IVY = slider('ivy', 'Ivy', 0.4, 'Disrepair', 'Ivy climbing up from the bottom of the tile.')
+    IVY_H = slider('ivy_height', 'Ivy Height', 0.55, 'Disrepair', 'How far up the ivy reaches.')
+    FILTH = slider('filth', 'Filth', 0.6, 'Disrepair', 'Heavy all-over soot and dirt.')
+    BOARD_C = colour('board_color', 'Board Colour', (0.42, 0.34, 0.24), 'Disrepair', 'Weathered plywood / planks.')
+    IVY_C = colour('ivy_color', 'Ivy Colour', (0.13, 0.22, 0.07), 'Disrepair')
+    MOSS_C = colour('moss_color', 'Moss Colour', (0.2, 0.26, 0.08), 'Disrepair')
+
 AO_STRENGTH = slider('ao_strength', 'AO Strength', 1.0, 'Output', vmin=0.2, vmax=3.0)
 NORMAL = g.param('normal_intensity', 'Normal Intensity', F(6.0), 'Output', vmin=0, vmax=20, step=0.1)
 NORMAL_FORMAT = g.param('normal_format', 'Normal Format', I1(0), 'Output', widget='dropdownlist',
@@ -248,6 +271,74 @@ brush = op.auto_levels(g.filter('dirmotionblur', {'input1': op.noise('bnw_spots_
 boards = op.auto_levels(g.filter('dirmotionblur', {'input1': op.noise('bnw_spots_3.sbs', seed_offset=30)}, out=GRAY,
                                  fmt=True, intensity=F(25.0), mblurangle=F(0.25)))
 
+# --- disrepair (derelict variant) ----------------------------------------------------------------------------------
+if DER:
+    def amt(p):
+        return clamp01(p * DECAY)
+    Qd = dict(broken=amt(BROKEN), boarded=amt(BOARDED))
+    x, y = M.pos()
+    h5, c5, rnd5, aux5, wv5, strk5, opf5, wk5, gf5 = L.facade(M, x, y, P)
+    hole, board, plank = L.window_decay(M, c5, rnd5, aux5, wv5, Qd)
+    DEC = pp_color(M.clamp(hole), M.clamp(board), M.clamp(plank), M.c(1.0), fmt=2)
+    HOLE = op.lv(chan(DEC, 0), in_lo=0.75, in_hi=0.8, fmt=True)
+    GCRACK = op.band(chan(DEC, 0), 0.4, 0.6)
+    BOARD = op.blur(chan(DEC, 1), 0.3, fmt=True)
+    PLANK = chan(DEC, 2)
+    x, y = M.pos()
+    h6, c6, rnd6, aux6, wv6, strk6, opf6, wk6, gf6 = L.facade(M, x, y, dict(P, material=M.c(2.0)))
+    SUB = pp_color(L.is_(M, c6, float(L.CID['joint'])), rnd6, M.c(0.0), M.c(1.0), fmt=2)
+    SUBJ, SUBR = chan(SUB, 0), chan(SUB, 1)
+    x, y = M.pos()
+    YG = g.filter('pixelprocessor', out=GRAY, fmt=2, colorswitch=B(False), perpixel=y)
+    WALLD = op.blend(WALLM, op.inv(op.blend(BOARD, HOLE, op.MAX)), op.MUL)
+    # cracks: crease lines of a warped noise, in patches
+    n_cr = noise('creased.sbs', 41)
+    n_cr = op.warp(n_cr, noise('clouds_2.sbs', 42), 0.03, fmt=True)
+    cracks = op.band(n_cr, 0.6, 0.64, 0.9)            # a thin contour of the warped crease noise: wandering lines
+    cracks = op.blend(cracks, op.scan(noise('moisture_noise.sbs', 43), 0.7 - amt(CRACKS) * 0.6, 0.3), op.MUL)
+    cracks = op.blend(op.blend(cracks, WALLD, op.MUL), op.gray(gate(amt(CRACKS))), op.MUL)
+    # crumbling: patches near openings and edges, jagged
+    near = op.lv(op.blur(op.blend(any_of('glass', 'frame', 'door', 'band', 'pier'), op.gray(1.0), op.MUL), 8.0, fmt=True),
+                 in_lo=0.0, in_hi=0.35)
+    crum = op.blend(op.lv(noise('grunge_map_011.sbs', 44), out_lo=0.0, out_hi=1.0),
+                    op.lv(near, out_lo=0.35, out_hi=1.0), op.MUL)
+    crum = op.blend(crum, op.lv(n_fine, out_lo=0.75, out_hi=1.15), op.MUL)
+    crum = op.scan(crum, 0.95 - amt(CRUMBLE) * 0.5, 0.9)
+    crum = op.blend(crum, WALLD, op.MUL)
+    # ivy: stalks rising from the bottom, leaves around them
+    stalks = op.auto_levels(g.filter('dirmotionblur', {'input1': op.noise('bnw_spots_1.sbs', seed_offset=45)}, out=GRAY,
+                                     fmt=True, intensity=F(60.0), mblurangle=F(0.25)))
+    reach = op.lv(YG, in_lo=1.0 - IVY_H * 1.05, in_hi=1.0)
+    grow = op.blend(op.blend(stalks, reach, op.MUL), op.lv(n_big, out_lo=0.4, out_hi=1.3), op.MUL)
+    leaves = noise('bnw_spots_3.sbs', 46)
+    ivy = op.blend(op.blur(grow, 2.0, fmt=True), op.lv(leaves, out_lo=0.0, out_hi=1.6), op.MUL)
+    ivy = op.scan(ivy, 0.42 - amt(IVY) * 0.25, 0.95)
+    ivy = op.blend(ivy, op.gray(gate(amt(IVY))), op.MUL)
+    # rot / mould: damp places (under sills and bands, cavities), and on boards
+    damp = op.blend(op.blur(STRK, 3.0, fmt=True), op.lv(op.blend(op.blur(height, 3.0, fmt=True), height, op.SUB, fmt=True),
+                                                            in_lo=0.0, in_hi=0.02), op.MAX)
+    mould = op.blend(op.lv(n_moist, in_lo=0.1, in_hi=0.85, out_lo=0.3, out_hi=1.3), op.lv(damp, out_lo=0.15), op.MUL)
+    mould = op.blend(mould, op.lv(noise('grunge_map_013.sbs', 47), out_lo=0.4, out_hi=1.2), op.MUL)
+    mould = op.blend(op.scan(mould, 0.75 - amt(ROT) * 0.55, 0.6), op.gray(gate(amt(ROT))), op.MUL)
+    ledge0 = op.lv(op.blend(op.blur(height, 1.5, fmt=True), height, op.SUB, fmt=True), in_lo=0.0, in_hi=0.02, fmt=True)
+    moss = op.blend(op.blend(op.lv(ledge0, out_hi=0.8), op.lv(damp, out_hi=0.6), op.MAX),
+                    op.lv(noise('bnw_spots_2.sbs', 48), out_lo=0.0, out_hi=1.4), op.MUL)
+    moss = op.blend(moss, op.lv(noise('clouds_2.sbs', 51), in_lo=0.3, in_hi=0.8), op.MUL)
+    moss = op.blend(op.scan(moss, 0.7 - amt(MOSS) * 0.5, 0.6), op.gray(gate(amt(MOSS))), op.MUL)
+    moss = op.blend(moss, op.inv(HOLE), op.MUL)
+    # height: holes sink, boards stand proud, crumbled areas drop, cracks groove, ivy builds up
+    height = op.lerp(height, op.lv(n_fine, out_lo=0.22, out_hi=0.27, fmt=True), HOLE, fmt=True)
+    height = op.lerp(height, op.blend(op.lv(PLANK, out_lo=0.555, out_hi=0.575, fmt=True), op.gray(0.0), op.ADD, fmt=True),
+                     BOARD, fmt=True)
+    height = op.blend(op.blend(crum, op.lv(n_fine, out_lo=0.02, out_hi=0.04, fmt=True), op.MUL, fmt=True), height,
+                      op.SUB, fmt=True)
+    height = op.blend(op.lv(cracks, out_hi=0.015, fmt=True), height, op.SUB, fmt=True)
+    height = op.lerp(height, op.blend(op.lv(SUBJ, out_hi=0.012, fmt=True), op.blur(height, 2.0, fmt=True), op.SUB,
+                                      fmt=True), crum, fmt=True)       # smooth out panel joints, brick joints instead
+    height = op.blend(op.blend(ivy, op.lv(leaves, out_lo=0.06, out_hi=0.12, fmt=True), op.MUL, fmt=True), height,
+                      op.ADD, fmt=True)
+    height = op.lv(height, fmt=True)
+
 
 # --- material weights (from the dropdown) -------------------------------------------------------------------------
 def mw(k):
@@ -328,6 +419,26 @@ col = op.blend(dirt, col, op.COPY, mask=grime, opacity=0.6)
 col = op.blend(dirt, col, op.COPY, mask=streak, opacity=0.55)
 col = op.blend(op.mottle(op.blend(op.color(DIRT_C), op.color((1.6, 1.6, 1.6)), op.MUL), n_fine, 0.1, R), col, op.COPY,
                mask=stain, opacity=0.22)
+if DER:
+    filth = op.blend(op.lv(n_big, out_lo=0.35, out_hi=1.0), op.lv(noise('grunge_map_014.sbs', 49), out_lo=0.5, out_hi=1.1),
+                     op.MUL)
+    col = op.blend(op.mottle(op.blend(op.color(DIRT_C), op.color((0.6, 0.6, 0.6)), op.MUL), n_fine, 0.2, R), col, op.COPY,
+                   mask=filth, opacity=amt(FILTH) * 0.75)
+    sub_col = op.lerp(op.mottle(op.color((0.42, 0.41, 0.39)), n_fine, 0.25, R),
+                      op.lerp(op.mottle(op.mottle(op.color((0.42, 0.2, 0.13)), SUBR, 0.25, (0.0, 1.0)), n_fine, 0.15, R),
+                              op.color((0.5, 0.48, 0.44)), SUBJ), op.gray(UNDER))
+    col = op.lerp(col, sub_col, crum)
+    col = op.blend(op.color((0.03, 0.028, 0.025)), col, op.COPY, mask=cracks, opacity=0.85)
+    col = op.lerp(col, op.mottle(op.mottle(op.color((0.035, 0.045, 0.03)), n_fine, 0.3, R), n_moist, 0.2, R), mould)
+    col = op.lerp(col, op.mottle(op.mottle(op.color(MOSS_C), n_fine, 0.35, R), n_clouds, 0.2, R), moss)
+    board_col = op.mottle(op.mottle(op.color(BOARD_C), PLANK, 0.3, (0.0, 1.0)), brush, 0.1, R)
+    board_col = op.lerp(board_col, op.color((0.12, 0.1, 0.08)), op.blend(mould, op.gray(1.6), op.MUL))
+    col = op.lerp(col, board_col, BOARD)
+    col = op.lerp(col, op.color((0.6, 0.65, 0.68)), op.blend(GCRACK, op.gray(0.5), op.MUL))
+    col = op.lerp(col, op.mottle(op.color((0.02, 0.02, 0.022)), n_fine, 0.3, R), HOLE)
+    ivy_col = op.mottle(op.mottle(op.mottle(op.color(IVY_C), leaves, 0.35, R), n_big, 0.25, R), n_fine, 0.2, R)
+    ivy_col = op.lerp(ivy_col, op.color((0.3, 0.26, 0.12)), op.lv(noise('bnw_spots_1.sbs', 50), in_lo=0.75, in_hi=0.85))
+    col = op.lerp(col, ivy_col, ivy)
 ao_col = op.lv(ao, out_lo=0.45, fmt=True)
 col = op.blend(op.blend(op.to_color(ao_col), col, op.MUL), col, op.COPY, opacity=0.6)
 
@@ -349,11 +460,22 @@ rough = op.lerp(rough, rg(0.9), op.blend(OPENM, GLASS, op.MUL))
 rough = op.lerp(rough, rg(0.92), op.lv(streak, out_hi=0.5))
 rough = op.lerp(rough, rg(0.9), op.lv(grime, out_hi=0.6))
 
+if DER:
+    rough = op.lerp(rough, rg(0.92), op.blend(HOLE, crum, op.MAX))
+    rough = op.lerp(rough, op.lv(PLANK, out_lo=0.75, out_hi=0.9), BOARD)
+    rough = op.lerp(rough, rg(0.9), op.blend(mould, moss, op.MAX))
+    rough = op.lerp(rough, op.lv(leaves, out_lo=0.45, out_hi=0.65), ivy)
+    rough = op.lerp(rough, rg(0.85), op.lv(filth, out_hi=amt(FILTH) * 0.6))
+
 metallic = op.blend(op.blend(op.gray(FRAME_M), FRAMES, op.MUL), op.blend(op.gray(METAL_W), WALLM, op.MUL), op.MAX)
 metallic = op.blend(op.lv(op.blend(streak, grime, op.MAX), out_hi=0.8), metallic, op.SUB)
 
 emis = op.blend(op.blend(op.color(LIGHT_C), INTC, op.MUL), op.to_color(op.blend(GLOW, GLASS, op.MUL, fmt=True)), op.MUL)
 emis = op.blend(op.gray(LIGHT_I), emis, op.MUL)
+if DER:
+    for m_ in (BOARD, ivy, crum, cracks, mould, moss):
+        metallic = op.blend(m_, metallic, op.SUB)
+    emis = op.blend(op.to_color(op.inv(op.blend(BOARD, ivy, op.MAX))), emis, op.MUL)
 
 g.output('basecolor', 'Base Color', 'baseColor', col)
 g.output('normal', 'Normal', 'normal', normal)
@@ -366,38 +488,60 @@ g.output('glass_mask', 'Glass Mask', 'any', GLASS, gray=True, group='Masks')
 
 
 # --- presets (layouts after the reference photos, plus material variants) --------------------------------------------
-g.preset('Office Grid')
-g.preset('Ribbon Office', material=0, groups=1, floors=6, pier_width=0.0, band_height=0.62, sills=False, panel_cols=0.5, panel_rows=3.0, band_depth=0.08, frame_color=(0.2, 0.18, 0.16, 1), glass_tint=(0.16, 0.3, 0.3, 1), wall_tint=(1.0, 1.0, 0.97, 1), streaks=0.15, stains=0.1, curtains=0.15, blinds=0.45, a_bays=10, a_width=1.0, a_height=1.0, a_top=0.0, a_mullions=0)
-g.preset('Residential Tower', material=6, groups=3, floors=8, pier_width=1.1, pier_depth=0.05, band_height=0.0, sills=False, frame_color=(0.85, 0.85, 0.83, 1), frame_metal=0.0, glass_tint=(0.12, 0.2, 0.35, 1), curtains=0.55, blinds=0.3, wall_tint=(0.95, 0.95, 0.97, 1), a_bays=4, a_width=1.0, a_height=0.62, a_top=0.18, a_mullions=0, a_transom=0.7)
-g.preset('Curtain Wall', material=4, groups=8, floors=14, pier_width=0.35, pier_depth=0.4, band_height=0.0, sills=False, panel_rows=1.0, frame_color=(0.15, 0.17, 0.2, 1), glass_tint=(0.2, 0.36, 0.48, 1), reflection=0.6, curtains=0.05, blinds=0.15, wall_tint=(1.05, 1.05, 1.08, 1), streaks=0.1, stains=0.05, grime=0.15, a_bays=1, a_width=1.0, a_height=1.0, a_top=0.0, a_mullions=2, a_transom=0.5)
-g.preset('Balcony Block', material=3, groups=5, floors=14, pier_width=0.18, pier_depth=0.6, band_height=0.12, band_depth=0.5, sills=False, frame_color=(0.55, 0.55, 0.55, 1), curtains=0.7, blinds=0.1, colourful=0.7, lit=0.2, streaks=0.6, grime=0.5, stains=0.5, a_bays=1, a_width=1.0, a_height=0.95, a_top=0.05, a_mullions=1, a_style=1)
-g.preset('Brutalist Slab', ac_units=0.12, material=1, groups=6, floors=9, pier_width=0.12, pier_depth=0.2, band_height=0.12, band_depth=0.4, panel_cols=1.0, frame_color=(0.3, 0.3, 0.3, 1), curtains=0.6, blinds=0.2, colourful=0.8, streaks=0.65, grime=0.5, stains=0.4, width_variation=0.15, a_bays=1, a_width=1.0, a_height=0.38, a_top=0.04, a_mullions=1)
-g.preset('Brick Walk-up', material=2, groups=1, floors=4, pier_width=0.0, band_height=0.0, brick_rows=36.0, frame_color=(0.88, 0.87, 0.84, 1), frame_metal=0.0, curtains=0.5, blinds=0.25, streaks=0.35, odd_windows=0.2, width_variation=0.3, a_bays=6, a_width=0.55, a_height=0.6, a_top=0.15, a_mullions=0, a_transom=0.55)
-g.preset('Metal Ribbon', material=5, groups=2, floors=7, pier_width=0.2, pier_depth=0.15, band_height=0.0, sills=False, panel_cols=2.0, panel_rows=1.0, frame_color=(0.1, 0.1, 0.11, 1), spandrel_color=(0.06, 0.07, 0.08, 1), glass_tint=(0.18, 0.24, 0.28, 1), grime=0.15, streaks=0.2, stains=0.05, a_bays=6, a_width=1.0, a_height=0.6, a_top=0.1, a_mullions=1, a_style=2)
-g.preset('Deco Lanes', material=4, groups=4, lane_pattern=5, floors=10, pier_width=0.3, band_height=0.0, pier_depth=0.5, panel_rows=1.0, wall_tint=(0.9, 0.82, 0.68, 1), frame_color=(0.12, 0.12, 0.12, 1), a_bays=3, a_width=0.62, a_height=0.6, a_top=0.2, a_mullions=1, b_bays=2, b_width=0.72, b_height=0.6, b_top=0.2, b_mullions=1, b_style=2)
-g.preset('Curtain Strip', material=4, groups=3, lane_pattern=2, floors=8, pier_width=0.2, band_height=0.0, pier_depth=0.2, wall_tint=(0.85, 0.9, 1.0, 1), glass_tint=(0.2, 0.34, 0.45, 1), a_bays=2, a_width=0.7, a_height=0.7, a_top=0.15, a_mullions=1, a_transom=0.25, b_bays=4, b_width=1.0, b_height=1.0, b_top=0.0, b_mullions=2, b_transom=0.5)
-g.preset('Glazed Lane', material=0, groups=3, lane_pattern=2, floors=12, pier_width=0.0, band_height=0.0, panel_rows=1.0, sills=False, a_bays=3, a_style=3, b_bays=1, b_width=1.0, b_height=0.5, b_top=0.0, b_mullions=2)
-g.preset('Mixed Balconies', material=6, groups=4, lane_pattern=6, floors=10, pier_width=0.25, band_height=0.0, pier_depth=0.1, wall_tint=(0.45, 0.45, 0.47, 1), sills=False, a_bays=2, a_width=0.75, a_height=0.45, a_top=0.25, a_mullions=1, b_bays=1, b_width=0.4, b_height=0.45, b_top=0.25, b_mullions=0, c_bays=2, c_width=1.0, c_height=0.8, c_top=0.1, c_mullions=1, c_transom=0.0, c_style=1)
-g.preset('Attic Rows', material=1, groups=1, floors=8, pier_width=0.0, band_height=0.1, special_every=4, special_type=1, a_bays=12, a_width=0.5, a_height=0.5, a_top=0.2, a_mullions=1, b_width=0.35, b_height=0.35, b_top=0.35, b_mullions=0)
-g.preset('Shopfront Street', material=0, groups=3, floors=4, ground_floor=True, ground_height=1.6, ground_bays=6,
-         door_share=0.35, window_share=0.6, door_grouping=1, bay_variation=0.4, glazed_doors=0.7, double_doors=0.4,
-         shop_window_width=0.86, shop_window_height=0.8, shop_mullions=2, shop_transom=0.18, ground_band=0.14,
-         ground_accent=0.8, ground_color=(0.22, 0.22, 0.24, 1), ac_units=0.15)
-g.preset('Brick Row Houses', material=2, groups=1, floors=3, a_bays=6, a_width=0.5, a_height=0.6, a_top=0.15,
-         a_mullions=0, a_transom=0.55, odd_windows=0.0, ground_floor=True, ground_height=1.2, ground_bays=6,
-         door_grouping=2, bay_variation=0.0, door_share=0.5, window_share=0.5, glazed_doors=0.0, double_doors=0.0,
-         door_width=0.36, door_height=0.75, shop_window_width=0.5, shop_window_height=0.6, shop_window_top=0.15,
-         shop_mullions=0, shop_transom=0.55, ground_band=0.06, ground_pier=0.0, ground_accent=0.0,
-         frame_color=(0.88, 0.87, 0.84, 1), frame_metal=0.0, door_color=(0.08, 0.12, 0.25, 1), sills=True)
-g.preset('Podium Tower', material=4, groups=3, lane_pattern=2, floors=8, pier_width=0.2, band_height=0.0,
-         a_bays=2, a_width=0.7, a_height=0.7, a_top=0.15, a_mullions=1, a_transom=0.25, b_bays=4, b_width=1.0,
-         b_height=1.0, b_top=0.0, b_mullions=2, b_transom=0.5, ground_floor=True, ground_height=2.2, ground_bays=4,
-         door_share=0.25, window_share=0.75, double_doors=1.0, glazed_doors=1.0, door_width=0.45, door_height=0.55,
-         shop_window_width=0.92, shop_window_height=0.88, shop_mullions=3, shop_transom=0.3, ground_pier=0.3,
-         ground_pier_depth=0.5, ground_band=0.1, ground_accent=0.9, ground_color=(0.3, 0.3, 0.32, 1))
-g.preset('AC Block', material=3, groups=1, floors=10, band_height=0.0, a_bays=12, a_width=0.6, a_height=0.4,
-         a_top=0.25, a_mullions=1, ac_units=0.45, ac_position=1, wall_tint=(0.75, 0.73, 0.7, 1), streaks=0.6,
-         grime=0.5, stains=0.4, curtains=0.4, blinds=0.35)
-g.preset('Night Lights', lit=0.55, light_intensity=3.0, reflection=0.15, curtains=0.5, blinds=0.25)
+if DER:
+    g.preset('Abandoned Office', lit=0.0, curtains=0.2, blinds=0.35, streaks=0.8, grime=0.7)
+    g.preset('Squatted Block', material=1, groups=6, floors=9, pier_width=0.12, pier_depth=0.2, band_height=0.12,
+             band_depth=0.4, a_bays=1, a_width=1.0, a_height=0.38, a_top=0.04, a_mullions=1, curtains=0.6, colourful=0.8,
+             lit=0.08, ac_units=0.2, broken_windows=0.45, boarded_up=0.15, cracks=0.6, crumbling=0.35, under_layer=0.0,
+             rot=0.5, moss=0.25, ivy=0.0, filth=0.8, streaks=0.9, grime=0.8, stains=0.6)
+    g.preset('Overgrown Brick', material=2, groups=1, floors=4, a_bays=6, a_width=0.55, a_height=0.6, a_top=0.15,
+             a_mullions=0, a_transom=0.55, frame_color=(0.6, 0.58, 0.52, 1), frame_metal=0.0, lit=0.0,
+             broken_windows=0.55, boarded_up=0.25, cracks=0.4, crumbling=0.2, rot=0.6, moss=0.6, ivy=0.85, ivy_height=0.8,
+             filth=0.5)
+    g.preset('Crumbling Render', material=3, groups=4, floors=5, pier_width=0.3, band_height=0.1, a_bays=2, a_width=0.55,
+             a_height=0.6, a_top=0.2, a_mullions=1, a_transom=0.3, wall_tint=(0.95, 0.88, 0.75, 1), lit=0.0,
+             broken_windows=0.3, boarded_up=0.3, cracks=0.8, crumbling=0.85, under_layer=1.0, rot=0.5, moss=0.3, ivy=0.25,
+             filth=0.55)
+    g.preset('Boarded Shops', material=0, groups=3, floors=4, ground_floor=True, ground_height=1.6, ground_bays=6,
+             door_share=0.35, window_share=0.6, glazed_doors=0.7, shop_window_width=0.86, shop_window_height=0.8,
+             ground_accent=0.8, ground_color=(0.22, 0.22, 0.24, 1), lit=0.0, broken_windows=0.4, boarded_up=0.45,
+             cracks=0.5, crumbling=0.3, rot=0.4, moss=0.2, ivy=0.3, ivy_height=0.35, filth=0.7)
+    g.preset('Total Ruin', disrepair=1.2, broken_windows=0.8, boarded_up=0.3, cracks=0.9, crumbling=0.9, rot=0.8, moss=0.7,
+             ivy=0.8, ivy_height=0.9, filth=0.9, lit=0.0, curtains=0.1, blinds=0.1, streaks=1.0, grime=1.0, stains=0.8)
+    g.preset('Light Neglect', disrepair=0.4, lit=0.05)
+else:
+    g.preset('Office Grid')
+    g.preset('Ribbon Office', material=0, groups=1, floors=6, pier_width=0.0, band_height=0.62, sills=False, panel_cols=0.5, panel_rows=3.0, band_depth=0.08, frame_color=(0.2, 0.18, 0.16, 1), glass_tint=(0.16, 0.3, 0.3, 1), wall_tint=(1.0, 1.0, 0.97, 1), streaks=0.15, stains=0.1, curtains=0.15, blinds=0.45, a_bays=10, a_width=1.0, a_height=1.0, a_top=0.0, a_mullions=0)
+    g.preset('Residential Tower', material=6, groups=3, floors=8, pier_width=1.1, pier_depth=0.05, band_height=0.0, sills=False, frame_color=(0.85, 0.85, 0.83, 1), frame_metal=0.0, glass_tint=(0.12, 0.2, 0.35, 1), curtains=0.55, blinds=0.3, wall_tint=(0.95, 0.95, 0.97, 1), a_bays=4, a_width=1.0, a_height=0.62, a_top=0.18, a_mullions=0, a_transom=0.7)
+    g.preset('Curtain Wall', material=4, groups=8, floors=14, pier_width=0.35, pier_depth=0.4, band_height=0.0, sills=False, panel_rows=1.0, frame_color=(0.15, 0.17, 0.2, 1), glass_tint=(0.2, 0.36, 0.48, 1), reflection=0.6, curtains=0.05, blinds=0.15, wall_tint=(1.05, 1.05, 1.08, 1), streaks=0.1, stains=0.05, grime=0.15, a_bays=1, a_width=1.0, a_height=1.0, a_top=0.0, a_mullions=2, a_transom=0.5)
+    g.preset('Balcony Block', material=3, groups=5, floors=14, pier_width=0.18, pier_depth=0.6, band_height=0.12, band_depth=0.5, sills=False, frame_color=(0.55, 0.55, 0.55, 1), curtains=0.7, blinds=0.1, colourful=0.7, lit=0.2, streaks=0.6, grime=0.5, stains=0.5, a_bays=1, a_width=1.0, a_height=0.95, a_top=0.05, a_mullions=1, a_style=1)
+    g.preset('Brutalist Slab', ac_units=0.12, material=1, groups=6, floors=9, pier_width=0.12, pier_depth=0.2, band_height=0.12, band_depth=0.4, panel_cols=1.0, frame_color=(0.3, 0.3, 0.3, 1), curtains=0.6, blinds=0.2, colourful=0.8, streaks=0.65, grime=0.5, stains=0.4, width_variation=0.15, a_bays=1, a_width=1.0, a_height=0.38, a_top=0.04, a_mullions=1)
+    g.preset('Brick Walk-up', material=2, groups=1, floors=4, pier_width=0.0, band_height=0.0, brick_rows=36.0, frame_color=(0.88, 0.87, 0.84, 1), frame_metal=0.0, curtains=0.5, blinds=0.25, streaks=0.35, odd_windows=0.2, width_variation=0.3, a_bays=6, a_width=0.55, a_height=0.6, a_top=0.15, a_mullions=0, a_transom=0.55)
+    g.preset('Metal Ribbon', material=5, groups=2, floors=7, pier_width=0.2, pier_depth=0.15, band_height=0.0, sills=False, panel_cols=2.0, panel_rows=1.0, frame_color=(0.1, 0.1, 0.11, 1), spandrel_color=(0.06, 0.07, 0.08, 1), glass_tint=(0.18, 0.24, 0.28, 1), grime=0.15, streaks=0.2, stains=0.05, a_bays=6, a_width=1.0, a_height=0.6, a_top=0.1, a_mullions=1, a_style=2)
+    g.preset('Deco Lanes', material=4, groups=4, lane_pattern=5, floors=10, pier_width=0.3, band_height=0.0, pier_depth=0.5, panel_rows=1.0, wall_tint=(0.9, 0.82, 0.68, 1), frame_color=(0.12, 0.12, 0.12, 1), a_bays=3, a_width=0.62, a_height=0.6, a_top=0.2, a_mullions=1, b_bays=2, b_width=0.72, b_height=0.6, b_top=0.2, b_mullions=1, b_style=2)
+    g.preset('Curtain Strip', material=4, groups=3, lane_pattern=2, floors=8, pier_width=0.2, band_height=0.0, pier_depth=0.2, wall_tint=(0.85, 0.9, 1.0, 1), glass_tint=(0.2, 0.34, 0.45, 1), a_bays=2, a_width=0.7, a_height=0.7, a_top=0.15, a_mullions=1, a_transom=0.25, b_bays=4, b_width=1.0, b_height=1.0, b_top=0.0, b_mullions=2, b_transom=0.5)
+    g.preset('Glazed Lane', material=0, groups=3, lane_pattern=2, floors=12, pier_width=0.0, band_height=0.0, panel_rows=1.0, sills=False, a_bays=3, a_style=3, b_bays=1, b_width=1.0, b_height=0.5, b_top=0.0, b_mullions=2)
+    g.preset('Mixed Balconies', material=6, groups=4, lane_pattern=6, floors=10, pier_width=0.25, band_height=0.0, pier_depth=0.1, wall_tint=(0.45, 0.45, 0.47, 1), sills=False, a_bays=2, a_width=0.75, a_height=0.45, a_top=0.25, a_mullions=1, b_bays=1, b_width=0.4, b_height=0.45, b_top=0.25, b_mullions=0, c_bays=2, c_width=1.0, c_height=0.8, c_top=0.1, c_mullions=1, c_transom=0.0, c_style=1)
+    g.preset('Attic Rows', material=1, groups=1, floors=8, pier_width=0.0, band_height=0.1, special_every=4, special_type=1, a_bays=12, a_width=0.5, a_height=0.5, a_top=0.2, a_mullions=1, b_width=0.35, b_height=0.35, b_top=0.35, b_mullions=0)
+    g.preset('Shopfront Street', material=0, groups=3, floors=4, ground_floor=True, ground_height=1.6, ground_bays=6,
+             door_share=0.35, window_share=0.6, door_grouping=1, bay_variation=0.4, glazed_doors=0.7, double_doors=0.4,
+             shop_window_width=0.86, shop_window_height=0.8, shop_mullions=2, shop_transom=0.18, ground_band=0.14,
+             ground_accent=0.8, ground_color=(0.22, 0.22, 0.24, 1), ac_units=0.15)
+    g.preset('Brick Row Houses', material=2, groups=1, floors=3, a_bays=6, a_width=0.5, a_height=0.6, a_top=0.15,
+             a_mullions=0, a_transom=0.55, odd_windows=0.0, ground_floor=True, ground_height=1.2, ground_bays=6,
+             door_grouping=2, bay_variation=0.0, door_share=0.5, window_share=0.5, glazed_doors=0.0, double_doors=0.0,
+             door_width=0.36, door_height=0.75, shop_window_width=0.5, shop_window_height=0.6, shop_window_top=0.15,
+             shop_mullions=0, shop_transom=0.55, ground_band=0.06, ground_pier=0.0, ground_accent=0.0,
+             frame_color=(0.88, 0.87, 0.84, 1), frame_metal=0.0, door_color=(0.08, 0.12, 0.25, 1), sills=True)
+    g.preset('Podium Tower', material=4, groups=3, lane_pattern=2, floors=8, pier_width=0.2, band_height=0.0,
+             a_bays=2, a_width=0.7, a_height=0.7, a_top=0.15, a_mullions=1, a_transom=0.25, b_bays=4, b_width=1.0,
+             b_height=1.0, b_top=0.0, b_mullions=2, b_transom=0.5, ground_floor=True, ground_height=2.2, ground_bays=4,
+             door_share=0.25, window_share=0.75, double_doors=1.0, glazed_doors=1.0, door_width=0.45, door_height=0.55,
+             shop_window_width=0.92, shop_window_height=0.88, shop_mullions=3, shop_transom=0.3, ground_pier=0.3,
+             ground_pier_depth=0.5, ground_band=0.1, ground_accent=0.9, ground_color=(0.3, 0.3, 0.32, 1))
+    g.preset('AC Block', material=3, groups=1, floors=10, band_height=0.0, a_bays=12, a_width=0.6, a_height=0.4,
+             a_top=0.25, a_mullions=1, ac_units=0.45, ac_position=1, wall_tint=(0.75, 0.73, 0.7, 1), streaks=0.6,
+             grime=0.5, stains=0.4, curtains=0.4, blinds=0.35)
+    g.preset('Night Lights', lit=0.55, light_intensity=3.0, reflection=0.15, curtains=0.5, blinds=0.25)
 
 op.finish(pkg, __file__, globals())

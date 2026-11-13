@@ -11,6 +11,7 @@ facade(M, x, y, P) -> (height, cls, rnd, aux)
   aux  = interior helper: u within the glass pane (0..1) for windows, else the wall pattern's per-unit random 2.
 """
 import math
+from pplib import rocks as _K
 
 CLASSES = ['wall', 'joint', 'band', 'pier', 'frame', 'glass', 'spandrel', 'railing', 'sill', 'door', 'ac',
            'ground']
@@ -112,7 +113,7 @@ def facade(M, x, y, P):
     TP = {k: pick3(M, ty_w, P['a_' + k], P['b_' + k], P['c_' + k]) for k in TYPE_KEYS[1:]}
     style = TP['style']
     # per window variation
-    wkey = hsh(M, bay_m, flo_m, seed + 21.0)
+    wkey = _K.hash12(M, bay_m + seed * 37.0, flo_m, 21.0)
     wk2 = M.frac(wkey * 17.31 + 0.13)
     wk3 = M.frac(wkey * 41.77 + 0.71)
     odd = M.b01(M.lt(wk2, P['odd']))
@@ -241,8 +242,8 @@ def facade(M, x, y, P):
     K = P['g_cluster']
     ncl = M.fmax(M.floor(gb / K + 0.5), 1.0)
     cid = M.mod(M.floor(gbay / K), ncl)
-    rkc = hsh(M, cid, 5.0, seed + 31.0)
-    rbb = hsh(M, M.mod(gbay, gb), 7.0, seed + 33.0)
+    rkc = _K.hash12(M, cid + seed * 37.0, 5.0, 31.0)
+    rbb = _K.hash12(M, M.mod(gbay, gb) + seed * 37.0, 7.0, 33.0)
     rk = rkc + (rbb - rkc) * P['g_mix']                      # 0 = whole clusters alike, 1 = every bay its own
     is_door = M.b01(M.lt(rk, P['g_doors']))
     is_gwin = M.b01(M.lt(rk, P['g_doors'] + P['g_windows'])) * (1.0 - is_door)
@@ -343,7 +344,7 @@ def facade(M, x, y, P):
     cg = M.sel(M.gt(in_gpier, 0.5), float(CID['pier']), cg)
     c = M.sel(M.gt(in_ground, 0.5), cg, c)
     c = M.sel(M.gt(joint * M.fmax(g_wall * (1.0 - in_gband) * (1.0 - in_gpier), up_wall), 0.5), float(CID['joint']), c)
-    win_key = hsh(M, bay_m, flo_m, seed + 1.0)
+    win_key = _K.hash12(M, bay_m + seed * 37.0, flo_m, 1.0)      # exact, evenly spread (the sine hash clumped)
     # in a ribbon a whole group-floor may share curtains; keep per bay (each pane is a room segment)
     rnd = M.sel(M.gt(in_win, 0.5), win_key, r_u)
     rnd = M.sel(M.gt(in_ground, 0.5), M.sel(M.gt(in_gopen, 0.5), rbb, r_u), rnd)
@@ -424,3 +425,43 @@ def interior(M, rnd, pu, wv, P, ground=0.0):
 
 
 IDEFAULTS = dict(curtains=0.45, blinds=0.2, lit=0.12, colourful=0.3, lit_r=0.12, lit_g=0.09, lit_b=0.05)
+
+
+# --- disrepair: broken and boarded windows ----------------------------------------------------------------------------
+def window_decay(M, c, rnd, aux, wv, P):
+    """Per window, from its random key: boarded (planks over the whole opening, some with a diagonal brace), or broken
+    (a jagged hole in each pane with cracks radiating from it; some panes gone entirely). Returns (hole, board, plank):
+      hole  = 1 hole, 0.5 crack line in the remaining glass, 0 intact
+      board = 1 where a board covers the opening (gaps between planks 0), plank = per plank tone / height 0..1."""
+    from pplib.decals import polar
+    PI2 = 6.2831853
+    opening = is_(M, c, CID['glass']) + is_(M, c, CID['frame']) + is_(M, c, CID['railing']) + is_(M, c, CID['door'])
+    glass = is_(M, c, CID['glass'])
+    k_b = M.frac(rnd * 17.93 + 0.41)
+    k_x = M.frac(rnd * 29.31 + 0.17)
+    boarded = M.b01(M.lt(k_b, P['boarded']))
+    broken = M.b01(M.lt(k_x, P['broken'])) * (1.0 - boarded)
+    gone = M.b01(M.lt(k_x, P['broken'] * 0.35)) * broken           # a third of broken panes have no glass left
+    # jagged hole: centre per window, radius jittered by angle
+    k1, k2, k3 = M.frac(rnd * 7.71 + 0.3), M.frac(rnd * 3.17 + 0.6), M.frac(rnd * 11.3 + 0.9)
+    cx, cy = 0.25 + 0.5 * k1, 0.2 + 0.6 * k2
+    r, a = polar(M, aux - cx, (wv - cy) * 0.6)
+    jag = (0.7 + 0.3 * M.fsin(a * 3.0 + k3 * PI2)) * (0.85 + 0.15 * M.fsin(a * 7.0 + k1 * 9.0)) * \
+        (0.93 + 0.07 * M.fsin(a * 17.0 + k2 * 5.0))
+    R0 = 0.12 + 0.3 * k3
+    in_hole = M.b01(M.lt(r, R0 * jag))
+    rays = M.fabs(M.frac(a / PI2 * (7.0 + 5.0 * k2) + k1) - 0.5)
+    crack = M.b01(M.lt(rays, 0.03)) * M.b01(M.lt(r, R0 * 2.6)) * (1.0 - in_hole)
+    hole = glass * broken * M.fmax(M.fmax(in_hole, gone), crack * 0.5 * (1.0 - gone))
+    # boards: horizontal planks (some vertical), uneven, plus a diagonal brace on some
+    n = 4.0 + M.floor(M.frac(rnd * 5.31 + 0.2) * 4.0)
+    vert = M.b01(M.lt(M.frac(rnd * 2.73 + 0.5), 0.3))
+    coord = M.sel(M.gt(vert, 0.5), aux * 2.0 + 0.03 * M.fsin(wv * 4.0 + k1 * 6.0), wv * n + 0.04 * M.fsin(aux * 3.0 + k2 * 6.0) + 0.08 * (aux - 0.5) * (k1 - 0.5))
+    pid = M.floor(coord)
+    pt = coord - pid
+    gap = M.b01(M.lt(pt, 0.06 + 0.06 * M.frac(pid * 0.37 + k3)))
+    plank = M.frac(M.fsin(pid * 12.9898 + rnd * 78.233) * 43758.5453) * 0.8 + 0.2 * (1.0 - M.fabs(pt - 0.53) * 2.0)
+    brace = M.b01(M.lt(M.fabs(aux - wv), 0.07)) * M.b01(M.lt(M.frac(rnd * 3.91 + 0.1), 0.45))
+    board = opening * boarded * M.fmax(1.0 - gap, brace)
+    plank = M.sel(M.gt(brace, 0.5), 0.95, plank)
+    return hole, board, plank

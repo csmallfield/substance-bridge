@@ -47,6 +47,18 @@ func find_param(id: String) -> Dictionary:
 	return {}
 
 
+## Starting values for the material, declared by the graph as "key=value" entries in its keywords (tags), e.g.
+## "specular=0.1". Applied once, when the bridge first creates the material; the user tunes them after that.
+## Known keys: specular (StandardMaterial3D Specular, 0.5 = the usual 4 % reflectance of non-metals).
+func material_hints() -> Dictionary:
+	var hints := {}
+	for kw in String(meta.get("keywords", "")).split(";", false):
+		var kv := kw.strip_edges().split("=")
+		if kv.size() == 2 and not kv[0].strip_edges().is_empty() and kv[1].strip_edges().is_valid_float():
+			hints[kv[0].strip_edges().to_lower()] = kv[1].to_float()
+	return hints
+
+
 func find_param_by_usertag(tag: String) -> Dictionary:
 	for p in params:
 		if p.get("usertag", "") == tag:

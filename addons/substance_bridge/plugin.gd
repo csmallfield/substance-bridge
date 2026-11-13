@@ -71,6 +71,12 @@ func _enter_tree() -> void:
 		_selftest.run.call_deferred(opacity_test)
 		return
 
+	var hints_test := OS.get_environment("SUBSTANCE_BRIDGE_HINTS_TEST")
+	if not hints_test.is_empty():
+		_selftest = load("res://addons/substance_bridge/tests/material_hints_check.gd").new()
+		_selftest.run.call_deferred(hints_test)
+		return
+
 	var selftest := OS.get_environment("SUBSTANCE_BRIDGE_SELFTEST")
 	if not selftest.is_empty():
 		# Held in a member: a deferred call does not keep a RefCounted alive.

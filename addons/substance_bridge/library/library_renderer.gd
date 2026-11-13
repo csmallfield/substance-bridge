@@ -10,6 +10,7 @@ extends Node
 ## sphere, spsm/spsm_renderer.gd); their thumbnail is Painter's own preview when the file has
 ## one, which saves a full render per file while the library fills in.
 
+const MaterialBuilder := preload("res://addons/substance_bridge/material/material_builder.gd")
 const Settings := preload("res://addons/substance_bridge/core/settings.gd")
 const GraphSettings := preload("res://addons/substance_bridge/core/graph_settings.gd")
 const Pipeline := preload("res://addons/substance_bridge/core/pipeline.gd")
@@ -136,6 +137,7 @@ func _render(path: String, size_log2: int) -> Dictionary:
 		return result
 	var mat := StandardMaterial3D.new()
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	MaterialBuilder.apply_hints(mat, gs.get_description().material_hints())  # previews match the first build
 	LivePreview.apply_outputs(mat, {}, maps["outputs"], gs.output_name)
 	result["material"] = mat
 	result["outputs"] = maps["outputs"]

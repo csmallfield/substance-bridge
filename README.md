@@ -45,6 +45,9 @@ In the Substance Bridge dock (top-right, beside the Inspector):
 - The **Substance Preview** bottom panel shows every output in 2D (tile, channel, zoom).
 - The Inspector's **Material Slots** group routes outputs to material slots: source (Auto, None or
   any output), strength, invert and a min/max remap, baked per slot.
+- **Material hints:** a graph can carry starting values for its material as `key=value` keywords
+  (for example `specular=0.1`). The bridge applies them once, when it first creates the material;
+  after that the values are yours to tune and re-renders keep them. Known key: `specular`.
 - **Tiling** (Inspector): UV scale and offset, set on the material with no re-render.
 - **Projection** (Inspector): planar, triplanar, cylindrical or spherical, baked into the mesh's
   own UVs (good for auto-generated UVs) after **Bake from Selected Mesh**. Axis, tile size,

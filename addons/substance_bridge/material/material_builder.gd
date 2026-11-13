@@ -28,7 +28,9 @@ var log_lines := PackedStringArray()
 
 ## Returns the saved material, or null on failure (see log_lines).
 ## routes: GraphSettings.routes (see routing.gd); empty = every output by its usage.
-func build(result: RenderResult, output_folder: String, name: String, routes: Dictionary = {}) -> StandardMaterial3D:
+## hints: GraphDescription.material_hints(), applied only when the material is created (see apply_hints).
+func build(result: RenderResult, output_folder: String, name: String, routes: Dictionary = {},
+		hints: Dictionary = {}) -> StandardMaterial3D:
 	var dir := output_folder.path_join(name)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
 
@@ -104,6 +106,7 @@ func build(result: RenderResult, output_folder: String, name: String, routes: Di
 		mat = ResourceLoader.load(mat_path) as StandardMaterial3D
 	if mat == null:
 		mat = StandardMaterial3D.new()
+		apply_hints(mat, hints)  # first build only: later re-renders keep the user's edits
 	for usage in WIRED_USAGES:
 		if usage == "opacity":
 			continue  # handled below: it lives in the albedo's alpha
@@ -136,6 +139,12 @@ func build(result: RenderResult, output_folder: String, name: String, routes: Di
 	log_lines.append("Material: %s (%s normals%s)" % [mat_path, result.normal_convention,
 			", green flipped on import" if result.normal_convention == "directx" else ""])
 	return mat
+
+
+## The graph's starting values for a new material (GraphDescription.material_hints()).
+static func apply_hints(mat: StandardMaterial3D, hints: Dictionary) -> void:
+	if hints.has("specular"):
+		mat.metallic_specular = clampf(float(hints["specular"]), 0.0, 1.0)
 
 
 static func _is_mapped(result: RenderResult, o: Dictionary) -> bool:

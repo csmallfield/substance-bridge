@@ -121,7 +121,9 @@ func render(gs: GraphSettings, size_log2: int, force: bool = false) -> Dictionar
 		return {"error": "; ".join(result.errors)}
 
 	var builder := MaterialBuilder.new()
-	var mat := await builder.build(result, String(config["output_folder"]), gs.output_name, gs.routes)
+	var desc := gs.get_description()
+	var hints := desc.material_hints() if desc else {}
+	var mat := await builder.build(result, String(config["output_folder"]), gs.output_name, gs.routes, hints)
 	for line in builder.log_lines:
 		_log(line)
 	if mat == null:

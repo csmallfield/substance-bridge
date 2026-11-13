@@ -328,6 +328,7 @@
       </tbody>
     </table>
     <p>Invert, Min/Max and Albedo strength are baked into that slot's texture (<code>&lt;name&gt;_&lt;slot&gt;.png</code> or <code>.exr</code>; float maps stay float). A colour output sent to a greyscale slot (roughness, metallic, AO, height) is converted to luminance. Choosing a source for Height also turns on parallax.</p>
+    <p><strong>Material hints.</strong> A graph can declare starting values for its material as <code>key=value</code> entries in its keywords, for example <code>specular=0.1</code> for grass, which reflects much less sky than Godot's default 0.5. The bridge sets them once, when it first creates the material. After that they are ordinary material settings: change them in the Inspector and re-renders leave them alone.</p>
     <p>Routing applies to live updates too, so you see it on the mesh as you change it. Reverting every field of a slot returns it to Auto; slots that nothing feeds any more are cleared.</p>
   </div>
   <figure>
